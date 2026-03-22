@@ -1,0 +1,46 @@
+graph TD
+    %% 核心 Agent 引擎
+    subgraph AgentEngine [SmartAgent4 核心引擎]
+        Supervisor[Supervisor 编排器]
+        FileAgent[FileAgent 文件领域代理]
+        TaskRouter[任务路由模块]
+    end
+
+    %% 记忆系统 (SmartMem 集成)
+    subgraph MemorySystem [记忆系统 SmartMem]
+        MemDB[(Memories 数据库)]
+        HybridSearch[混合检索模块 BM25+Vector]
+        Consolidation[记忆巩固服务]
+        Forgetting[动态遗忘服务]
+    end
+
+    %% 情感与语音系统 (Emotions-System 集成)
+    subgraph EmotionSystem [情感与语音系统]
+        EmotionClient[EmotionsSystemClient]
+        TTS_Service[[外部 Emotions-System 微服务]]
+    end
+
+    %% 文件整理大师 (MCP 扩展)
+    subgraph FileOrganizer [文件整理大师 MCP]
+        MCP_Manager[MCP Manager]
+        FileTools[文件系统工具集]
+        Analyzer[目录分析与同名汇总]
+        Cleaner[安全清理与移动]
+    end
+
+    %% 交互关系
+    Supervisor -->|调用| TaskRouter
+    TaskRouter -->|路由到| FileAgent
+    FileAgent -->|调用| MCP_Manager
+    MCP_Manager -->|执行| FileTools
+    FileTools --> Analyzer
+    FileTools --> Cleaner
+
+    Supervisor -->|读写| HybridSearch
+    HybridSearch --> MemDB
+    Consolidation -->|定时提炼| MemDB
+    Forgetting -->|衰减计算| MemDB
+
+    Supervisor -->|输出带情感文本| EmotionClient
+    EmotionClient -->|HTTP POST| TTS_Service
+    TTS_Service -->|返回音频流| EmotionClient
