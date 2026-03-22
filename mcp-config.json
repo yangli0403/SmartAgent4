@@ -1,0 +1,58 @@
+{
+  "$schema": "SmartAgent MCP Config v2.0",
+  "description": "MCP Server 配置文件。API Key 等敏感信息建议使用环境变量（格式：${ENV_VAR_NAME}）。",
+  "servers": [
+    {
+      "id": "local-filesystem",
+      "name": "文件系统",
+      "transport": "stdio",
+      "enabled": false,
+      "autoConnect": false,
+      "category": "file_system",
+      "command": "node",
+      "args": ["local-mcp-server/dist/filesystem/index.js"],
+      "connectTimeout": 10000,
+      "toolTimeout": 30000
+    },
+    {
+      "id": "local-appbrowser",
+      "name": "应用浏览器",
+      "transport": "stdio",
+      "enabled": false,
+      "autoConnect": false,
+      "category": "app_browser",
+      "command": "node",
+      "args": ["local-mcp-server/dist/appbrowser/index.js"],
+      "connectTimeout": 10000,
+      "toolTimeout": 30000
+    },
+    {
+      "id": "amap",
+      "name": "高德地图",
+      "transport": "sse",
+      "enabled": true,
+      "autoConnect": true,
+      "category": "navigation",
+      "url": "https://mcp.amap.com/sse?key=${AMAP_API_KEY}",
+      "apiKey": "${AMAP_API_KEY}",
+      "connectTimeout": 15000,
+      "toolTimeout": 30000,
+      "reconnectInterval": 5000,
+      "maxReconnectAttempts": 3
+    },
+    {
+      "id": "netease-music",
+      "name": "网易云音乐",
+      "transport": "sse",
+      "enabled": true,
+      "autoConnect": true,
+      "category": "multimedia",
+      "description": "内嵌服务，随主服务自动启动。源码位于 server/mcp/netease/",
+      "url": "http://localhost:3001/sse",
+      "connectTimeout": 15000,
+      "toolTimeout": 30000,
+      "reconnectInterval": 5000,
+      "maxReconnectAttempts": 3
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant MainApp as SmartAgent3 Main App (Node.js)
+    participant LLM
+    participant DB as Database (MySQL/TiDB)
+    participant Emotions as Emotions-Express (Python)
+
+    User->>+Frontend: 1. Sends message
+    Frontend->>+MainApp: 2. Forwards message (tRPC/WebSocket)
+
+    MainApp->>+DB: 3. Retrieves conversation history & user profile
+    DB-->>-MainApp: Returns data
+
+    MainApp->>MainApp: 4. Calls Memory System to search relevant memories
+    MainApp->>DB: Searches memories
+    DB-->>MainApp: Returns memories
+
+    MainApp->>MainApp: 5. Calls Personality Engine to build System Prompt (with memories, profile, persona)
+
+    MainApp->>+LLM: 6. Supervisor: Classify & Plan (using dynamic prompt)
+    LLM-->>-MainApp: Returns plan/next step
+
+    MainApp->>MainApp: 7. Supervisor: Execute step via Domain Agent (e.g., call MCP tool)
+
+    MainApp->>+LLM: 8. Supervisor: Generate final text response (with emotion tag instructions)
+    LLM-->>-MainApp: Returns text with [emotion:happy] tags
+
+    MainApp->>+Emotions: 9. Sends text for emotional rendering
+    Emotions->>Emotions: Parses tags, generates TTS audio & actions
+    Emotions-->>-MainApp: 10. Streams back multimodal data (text, audio, actions)
+
+    MainApp-->>-Frontend: 11. Streams multimodal response
+    Frontend-->>-User: 12. Renders text, plays audio, shows avatar animation
+
+    par Asynchronous Operations
+        MainApp->>MainApp: 13. (async) Memory Extraction
+        MainApp->>+LLM: Extracts new memories from conversation
+        LLM-->>-MainApp: Returns structured memories
+        MainApp->>+DB: Saves new memories
+        DB-->>-MainApp: 
+    end
+```

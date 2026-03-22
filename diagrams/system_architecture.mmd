@@ -1,0 +1,28 @@
+```mermaid
+graph TD
+    A[User] --> B(Web UI);
+    B -- tRPC/WebSocket --> C{API Gateway};
+    C --> D[Supervisor];
+    D --> E[Personality Engine];
+    D --> F[Memory System];
+    D --> G[Agent Executor];
+    G --> H[Domain Agents];
+    F --> I[(Database)];
+    D --> I;
+    D --> J[LLM API];
+    H -- MCP --> K[MCP Servers];
+    D --> L[Emotions-Express];
+
+    style A fill:#08427B,color:#fff
+    style B fill:#438DD5,color:#fff
+    style C fill:#1E90FF,color:#fff
+    style D fill:#1E90FF,color:#fff
+    style E fill:#f9f9f9,stroke:#333
+    style F fill:#f9f9f9,stroke:#333
+    style G fill:#f9f9f9,stroke:#333
+    style H fill:#f9f9f9,stroke:#333
+    style I fill:#707070,color:#fff
+    style J fill:#9932CC,color:#fff
+    style K fill:#FF8C00,color:#fff
+    style L fill:#228B22,color:#fff
+```
