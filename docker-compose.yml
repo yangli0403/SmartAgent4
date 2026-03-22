@@ -1,0 +1,33 @@
+# ============================================================
+# SmartAgent4 Docker Compose 配置
+# 用于在 Windows 上快速启动 MySQL 数据库
+#
+# 前置条件：安装 Docker Desktop for Windows
+# 启动命令：docker-compose up -d
+# 停止命令：docker-compose down
+# ============================================================
+
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: smartagent4-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: smart_agent
+      MYSQL_CHARACTER_SET_SERVER: utf8mb4
+      MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - smartagent4_mysql_data:/var/lib/mysql
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+
+volumes:
+  smartagent4_mysql_data:
+    driver: local

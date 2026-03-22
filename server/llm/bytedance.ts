@@ -28,12 +28,12 @@ export interface LLMOptions {
   stream?: boolean;
 }
 
-// Manus 内置 LLM 配置（优先）
-const MANUS_API_KEY = process.env.OPENAI_API_KEY ?? "";
-const MANUS_BASE_URL =
+// OpenAI 兼容 LLM 配置（优先）
+const OPENAI_KEY = process.env.OPENAI_API_KEY ?? "";
+const OPENAI_URL =
   process.env.OPENAI_BASE_URL ??
   process.env.OPENAI_API_BASE ??
-  "https://api.manus.im/api/llm-proxy/v1";
+  ""; // Windows-compat: 不再默认指向 Manus 内部网关
 
 // Volcengine ARK 回退配置
 const ARK_API_KEY = process.env.ARK_API_KEY || "7c4d52bf-e540-4337-a9ab-1a5228acedaa";
@@ -41,10 +41,12 @@ const ARK_BASE_URL = process.env.ARK_API_URL || "https://ark.cn-beijing.volces.c
 const ARK_DEFAULT_MODEL = process.env.ARK_DEFAULT_MODEL || "ep-20250811200411-zctsd";
 
 // 统一选择
-const USE_MANUS_LLM = Boolean(MANUS_API_KEY);
-const ACTIVE_API_KEY = USE_MANUS_LLM ? MANUS_API_KEY : ARK_API_KEY;
-const ACTIVE_BASE_URL = USE_MANUS_LLM ? MANUS_BASE_URL : ARK_BASE_URL;
-const DEFAULT_MODEL = USE_MANUS_LLM ? "gpt-4.1-mini" : ARK_DEFAULT_MODEL;
+const USE_OPENAI = Boolean(OPENAI_KEY) && Boolean(OPENAI_URL);
+const ACTIVE_API_KEY = USE_OPENAI ? OPENAI_KEY : ARK_API_KEY;
+const ACTIVE_BASE_URL = USE_OPENAI ? OPENAI_URL : ARK_BASE_URL;
+const DEFAULT_MODEL = USE_OPENAI
+  ? (process.env.OPENAI_DEFAULT_MODEL || "gpt-4.1-mini")
+  : ARK_DEFAULT_MODEL;
 
 /**
  * Call LLM (Manus built-in or Volcengine ARK fallback)

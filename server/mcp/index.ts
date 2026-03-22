@@ -90,6 +90,10 @@ ${fileSystemToolsServerCode}
 
 ${appBrowserToolsServerCode}
 
+// ============== 文件整理大师工具实现 ==============
+
+${fileOrganizerServerCode}
+
 // ============== API路由 ==============
 
 /**
@@ -119,6 +123,10 @@ app.get('/tools', (req, res) => {
       { name: 'browser_control', category: 'appBrowser', description: '浏览器控制' },
       { name: 'list_running_apps', category: 'appBrowser', description: '列出运行中的应用' },
       { name: 'close_app', category: 'appBrowser', description: '关闭应用' },
+      { name: 'analyze_directory', category: 'fileOrganizer', description: '分析目录文件分布' },
+      { name: 'find_duplicates', category: 'fileOrganizer', description: '查找重复/同名文件' },
+      { name: 'delete_files', category: 'fileOrganizer', description: '安全删除文件' },
+      { name: 'move_files', category: 'fileOrganizer', description: '批量移动文件' },
     ],
   });
 });
@@ -160,6 +168,18 @@ app.post('/execute', async (req, res) => {
       case 'close_app':
         result = await closeApp(params);
         break;
+      case 'analyze_directory':
+        result = await analyzeDirectory(params);
+        break;
+      case 'find_duplicates':
+        result = await findDuplicates(params);
+        break;
+      case 'delete_files':
+        result = await deleteFiles(params);
+        break;
+      case 'move_files':
+        result = await moveFiles(params);
+        break;
       default:
         result = { error: \`未知工具: \${tool}\` };
     }
@@ -192,6 +212,10 @@ app.listen(PORT, () => {
   console.log('║  - browser_control  浏览器控制                             ║');
   console.log('║  - list_running_apps 列出运行中的应用                      ║');
   console.log('║  - close_app        关闭应用                               ║');
+  console.log('║  - analyze_directory 分析目录文件分布                     ║');
+  console.log('║  - find_duplicates   查找重复/同名文件                     ║');
+  console.log('║  - delete_files      安全删除文件                           ║');
+  console.log('║  - move_files        批量移动文件                           ║');
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('');
 });

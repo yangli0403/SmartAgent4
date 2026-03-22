@@ -7,13 +7,13 @@
 
 import { ChatOpenAI } from "@langchain/openai";
 
-// ==================== Manus 内置 LLM 配置（优先） ====================
+// ==================== OpenAI 兼容 LLM 配置（优先） ====================
 
-const MANUS_API_KEY = process.env.OPENAI_API_KEY ?? "";
-const MANUS_BASE_URL =
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
+const OPENAI_BASE_URL =
   process.env.OPENAI_BASE_URL ??
   process.env.OPENAI_API_BASE ??
-  "https://api.manus.im/api/llm-proxy/v1";
+  ""; // Windows-compat: 不再默认指向 Manus 内部网关，需在 .env 中显式配置
 
 // ==================== Volcengine ARK 回退配置 ====================
 
@@ -26,20 +26,22 @@ const ARK_DEFAULT_MODEL =
 
 // ==================== 统一配置选择 ====================
 
-/** 是否使用 Manus 内置 LLM */
-const USE_MANUS_LLM = Boolean(MANUS_API_KEY);
+/** 是否使用 OpenAI 兼容 API（本地配置的 OPENAI_API_KEY + OPENAI_BASE_URL） */
+const USE_OPENAI_COMPAT = Boolean(OPENAI_API_KEY) && Boolean(OPENAI_BASE_URL);
 
 /** 当前激活的 API Key */
-const ACTIVE_API_KEY = USE_MANUS_LLM ? MANUS_API_KEY : ARK_API_KEY;
+const ACTIVE_API_KEY = USE_OPENAI_COMPAT ? OPENAI_API_KEY : ARK_API_KEY;
 /** 当前激活的 Base URL */
-const ACTIVE_BASE_URL = USE_MANUS_LLM ? MANUS_BASE_URL : ARK_BASE_URL;
-/** 默认模型：Manus 使用 gpt-4.1-mini，ARK 使用 DeepSeek 端点 */
-const DEFAULT_MODEL = USE_MANUS_LLM ? "gpt-4.1-mini" : ARK_DEFAULT_MODEL;
+const ACTIVE_BASE_URL = USE_OPENAI_COMPAT ? OPENAI_BASE_URL : ARK_BASE_URL;
+/** 默认模型：OpenAI 兼容使用 gpt-4.1-mini，ARK 使用 DeepSeek 端点 */
+const DEFAULT_MODEL = USE_OPENAI_COMPAT
+  ? (process.env.OPENAI_DEFAULT_MODEL || "gpt-4.1-mini")
+  : ARK_DEFAULT_MODEL;
 
 console.log(
   `[LangChainAdapter] Using ${
-    USE_MANUS_LLM ? "Manus built-in" : "Volcengine ARK"
-  } LLM, model: ${DEFAULT_MODEL}`
+    USE_OPENAI_COMPAT ? "OpenAI-compatible" : "Volcengine ARK"
+  } LLM, baseUrl: ${ACTIVE_BASE_URL}, model: ${DEFAULT_MODEL}`
 );
 
 // ==================== LLM 创建 ====================

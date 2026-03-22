@@ -219,30 +219,53 @@ const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
 
 const resolveApiUrl = () => {
-  // Priority: OpenRouter > Manus Forge > Default Manus
+  // Priority: OPENAI_BASE_URL (local) > OpenRouter > Manus Forge > ARK
+  const localBaseUrl = process.env.OPENAI_BASE_URL || process.env.OPENAI_API_BASE;
+  if (localBaseUrl && localBaseUrl.trim().length > 0) {
+    const base = localBaseUrl.replace(/\/$/, "");
+    // 如果已经包含 /chat/completions 则直接使用
+    return base.endsWith("/chat/completions") ? base : `${base}/chat/completions`;
+  }
   if (OPENROUTER_API_KEY) {
     return OPENROUTER_API_URL;
   }
   if (ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0) {
     return `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`;
   }
-  return "https://forge.manus.im/v1/chat/completions";
+  // Windows-compat: 不再默认指向 Manus 内部网关
+  // 如果没有任何配置，尝试使用 ARK 或报错
+  const arkUrl = process.env.ARK_API_URL;
+  if (arkUrl) {
+    return `${arkUrl.replace(/\/$/, "")}/chat/completions`;
+  }
+  throw new Error(
+    "LLM API URL 未配置。请在 .env 中设置 OPENAI_BASE_URL（如 https://api.openai.com/v1）或 ARK_API_URL"
+  );
 };
 
 const assertApiKey = () => {
-  // Check OpenRouter first, then Manus
+  // Check: OPENAI_API_KEY > OpenRouter > Forge > ARK
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey && openaiKey.trim().length > 0) {
+    return; // 本地 OpenAI API Key 已配置
+  }
   if (OPENROUTER_API_KEY) {
     return; // OpenRouter is configured
   }
-  if (!ENV.forgeApiKey) {
-    throw new Error(
-      "LLM API key is not configured. Please set either OPENROUTER_API_KEY or BUILT_IN_FORGE_API_KEY"
-    );
+  if (ENV.forgeApiKey) {
+    return; // Forge key is configured
   }
+  const arkKey = process.env.ARK_API_KEY;
+  if (arkKey && arkKey.trim().length > 0) {
+    return; // ARK key is configured
+  }
+  throw new Error(
+    "LLM API Key 未配置。请在 .env 中设置 OPENAI_API_KEY 或 ARK_API_KEY 或 OPENROUTER_API_KEY"
+  );
 };
 
 const getApiKey = () => {
-  return OPENROUTER_API_KEY || ENV.forgeApiKey || "";
+  return process.env.OPENAI_API_KEY || OPENROUTER_API_KEY || ENV.forgeApiKey || process.env.ARK_API_KEY || "";
 };
 
 const normalizeResponseFormat = ({
