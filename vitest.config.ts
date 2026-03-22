@@ -5,13 +5,16 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.ts", "server/**/__tests__/**/*.test.ts"],
     coverage: {
       provider: "v8",
       include: [
         "server/personality/**/*.ts",
         "server/emotions/**/*.ts",
-        "server/memory/profileBuilder.ts",
+        "server/memory/**/*.ts",
+        "server/mcp/fileOrganizerTools.ts",
+        "server/mcp/fileOrganizerRegistration.ts",
+        "server/mcp/toolRegistry.ts",
       ],
       exclude: ["**/*.test.ts", "**/index.ts"],
     },

@@ -83,7 +83,7 @@ export const findDuplicatesTool = {
 export const deleteFilesTool = {
   name: "delete_files",
   description:
-    "删除指定的文件列表。【重要安全规则】：你必须先向用户展示要删除的文件列表，获得用户明确确认（如"确认删除"、"好的"）后才能调用此工具。未经用户确认直接调用将被视为违规操作。",
+    "删除指定的文件列表。【重要安全规则】：你必须先向用户展示要删除的文件列表，获得用户明确确认（如'确认删除'、'好的'）后才能调用此工具。未经用户确认直接调用将被视为违规操作。",
   parameters: z.object({
     filePaths: z
       .array(z.string())

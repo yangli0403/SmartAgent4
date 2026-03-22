@@ -76,7 +76,10 @@ function zodFieldToJsonSchema(field: z.ZodType): Record<string, unknown> {
   }
   if (field instanceof z.ZodDefault) {
     const inner = zodFieldToJsonSchema(field.removeDefault());
-    return { ...inner, default: field._def.defaultValue() };
+    const defaultVal = typeof field._def.defaultValue === 'function'
+      ? field._def.defaultValue()
+      : field._def.defaultValue;
+    return { ...inner, default: defaultVal };
   }
   return { type: "string" };
 }
