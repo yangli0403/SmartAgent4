@@ -17,6 +17,7 @@ import { NavigationAgent } from "./domains/navigationAgent";
 import { MultimediaAgent } from "./domains/multimediaAgent";
 import { GeneralAgent } from "./domains/generalAgent";
 import { registerFreeWeatherTools } from "../mcp/freeWeatherTools";
+import { registerFileOrganizerTools } from "../mcp/fileOrganizerRegistration";
 import {
   runSupervisor,
   type SupervisorInput,
@@ -76,6 +77,10 @@ export class SmartAgentApp {
     // 2.5 注册内置免费工具（无需 API Key，无需 MCP Server 连接）
     registerFreeWeatherTools(this.toolRegistry);
     console.log("[SmartAgentApp] Free weather/location tools registered");
+
+    // 2.6 注册文件整理大师工具（SmartAgent4 新增）
+    registerFileOrganizerTools(this.toolRegistry);
+    console.log("[SmartAgentApp] File organizer tools registered");
 
     // 3. 注入 MCP 工具调用能力到 Context Manager
     this.contextManager.setMCPCallTool(

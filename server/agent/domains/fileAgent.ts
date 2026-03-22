@@ -1,9 +1,9 @@
 /**
- * FileAgent — 文件系统专员
+ * FileAgent — 文件系统专员 (SmartAgent4)
  *
  * 负责处理文件搜索、打开、创建、复制等文件系统操作。
- * 绑定本地 MCP Server 的文件系统工具（7个）和应用浏览器工具（4个）。
- * 保留原有 SmartAgent 的文件处理能力。
+ * SmartAgent4 新增：文件整理大师功能（目录分析、同名/重复文件检测、安全删除、批量移动）。
+ * 绑定本地 MCP Server 的文件系统工具和文件整理工具。
  * 内部运行 LangGraph ReACT 循环（继承 BaseAgent）。
  */
 
@@ -18,17 +18,39 @@ import type { MCPManager } from "../../mcp/mcpManager";
 /** FileAgent 默认配置 */
 export const FILE_AGENT_CONFIG: DomainAgentConfig = {
   name: "fileAgent",
-  description: "文件系统专员，负责文件搜索、打开、创建、复制等操作",
-  systemPrompt: `你是文件系统操作专家。你可以帮助用户搜索文件、查看文件信息、打开文件、
-创建文件和文件夹、复制文件等。
+  description:
+    "文件系统专员，负责文件搜索、打开、创建、复制，以及文件整理（目录分析、同名/重复文件检测、清理）等操作",
+  systemPrompt: `你是文件系统操作专家，同时也是一位"文件整理大师"。你可以帮助用户搜索文件、查看文件信息、打开文件、
+创建文件和文件夹、复制文件，以及进行高级的文件整理和清理操作。
 
-操作原则：
+基础操作原则：
 1. 搜索文件时，优先使用 search_files 工具，根据用户描述推断搜索条件
 2. 时间描述转换：如"昨天"转为具体日期，"最近"转为近7天
 3. 打开文件前先确认文件存在
 4. 批量操作时使用 copy_files 工具
-5. 创建文件夹使用 create_folder，创建文件使用 create_file（需带扩展名）`,
+5. 创建文件夹使用 create_folder，创建文件使用 create_file（需带扩展名）
+
+文件整理大师操作原则：
+6. 当用户要求"整理文件"、"清理下载目录"、"找重复文件"等，使用文件整理工具
+7. 使用 analyze_directory 了解目录整体情况（类型分布、大文件、旧文件）
+8. 使用 find_duplicates 检测同名文件和完全重复的文件
+9. 使用 move_files 将文件归档到其他目录
+
+【最重要的安全规则】：
+10. 在调用 delete_files 之前，你必须：
+    a. 先向用户清晰展示要删除的文件列表（文件名、大小、路径）
+    b. 明确告知用户将释放多少空间
+    c. 等待用户明确确认（如"确认删除"、"好的"、"可以"）
+    d. 只有在用户确认后才能调用 delete_files
+    e. 未经用户确认直接删除文件是严格禁止的！
+
+文件整理工作流建议：
+- 第一步：使用 analyze_directory 扫描目录，向用户展示概况
+- 第二步：使用 find_duplicates 找出同名和重复文件
+- 第三步：向用户展示可清理的文件列表和预计释放空间
+- 第四步：等待用户确认后，使用 delete_files 或 move_files 执行操作`,
   toolNames: [
+    // 基础文件系统工具
     "search_files",
     "get_file_info",
     "open_file",
@@ -36,14 +58,20 @@ export const FILE_AGENT_CONFIG: DomainAgentConfig = {
     "create_folder",
     "create_file",
     "copy_files",
+    // 应用浏览器工具
     "launch_app",
     "browser_control",
     "list_running_apps",
     "close_app",
+    // 文件整理大师工具（SmartAgent4 新增）
+    "analyze_directory",
+    "find_duplicates",
+    "delete_files",
+    "move_files",
   ],
-  maxIterations: 5,
+  maxIterations: 8, // 文件整理可能需要更多轮次
   temperature: 0.3,
-  maxTokens: 2000,
+  maxTokens: 3000,
 };
 
 /**
@@ -80,7 +108,9 @@ export class FileAgent extends BaseAgent {
   /**
    * 解析文件类结构化数据
    */
-  protected parseStructuredData(output: string): AgentStructuredData | undefined {
+  protected parseStructuredData(
+    output: string
+  ): AgentStructuredData | undefined {
     try {
       const jsonMatch = output.match(/```json\s*([\s\S]*?)\s*```/);
       if (jsonMatch) {

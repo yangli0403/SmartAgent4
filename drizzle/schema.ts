@@ -88,6 +88,10 @@ export const memories = mysqlTable(
     confidence: float("confidence").default(0.8).notNull(), // 0-1
     accessCount: int("accessCount").default(0).notNull(),
     clusterId: int("clusterId"), // reference to memory_clusters for consolidation
+    // --- SmartMem 扩展字段 ---
+    embedding: json("embedding").$type<number[] | null>(), // 向量嵌入，用于混合检索
+    validFrom: timestamp("validFrom"), // 记忆生效时间（可选）
+    validUntil: timestamp("validUntil"), // 记忆失效时间（可选）
     // 统一标签与来源说明，便于搜索与调试
     tags: json("tags").$type<string[] | null>(),
     source: varchar("source", { length: 64 }),

@@ -26,6 +26,9 @@ import {
   formatMemoriesForContext,
 } from "./profileBuilder";
 import type { ContextualProfileSnapshot } from "../personality/types";
+import { hybridSearch, reflectOnMemories, type HybridSearchResult } from "./hybridSearch";
+import { consolidateMemories as smartMemConsolidate } from "./consolidationService";
+import { applyForgettingDecay } from "./forgettingService";
 
 // ==================== 类型定义 ====================
 
@@ -37,6 +40,11 @@ export interface MemorySearchOptions {
   versionGroup?: string;
   limit?: number;
   minImportance?: number;
+  // --- SmartMem 扩展 ---
+  useHybridSearch?: boolean;
+  queryEmbedding?: number[] | null;
+  alpha?: number; // BM25 与 Vector 的权重调节 (0-1)
+  enableReflect?: boolean; // 是否启用 LLM 二次推理
 }
 
 export interface MemoryFormationInput {
@@ -185,7 +193,41 @@ export async function searchMemories(
       conditions.push(eq(memories.versionGroup, versionGroup));
     }
 
-    // 关键词匹配（后续可升级为向量搜索）
+    // --- SmartMem 混合检索分支 ---
+    if (options.useHybridSearch && query) {
+      // 先拉取候选集（不带关键词过滤，由混合检索自行评分）
+      const candidates = await db
+        .select()
+        .from(memories)
+        .where(and(...conditions))
+        .orderBy(desc(memories.importance))
+        .limit(Math.max(limit * 5, 50)); // 拉取更多候选
+
+      const hybridResults = hybridSearch({
+        query,
+        queryEmbedding: options.queryEmbedding,
+        candidates,
+        limit,
+        alpha: options.alpha ?? 0.5,
+      });
+
+      const results = hybridResults.map((r) => r.memory);
+
+      // 异步更新访问计数
+      for (const memory of results) {
+        db.update(memories)
+          .set({
+            accessCount: memory.accessCount + 1,
+            lastAccessedAt: new Date(),
+          })
+          .where(eq(memories.id, memory.id))
+          .catch(() => {});
+      }
+
+      return results;
+    }
+
+    // --- 原有关键词匹配（兼容模式） ---
     if (query) {
       conditions.push(sql`${memories.content} LIKE ${`%${query}%`}`);
     }
@@ -655,59 +697,17 @@ export async function getFormattedMemoryContext(
 // ==================== 后台任务 ====================
 
 /**
- * 记忆整合（后台任务）
+ * 记忆整合（后台任务）—— SmartMem 增强版
  *
  * 合并相似记忆，创建高层抽象。
+ * 现在委托给 SmartMem 的 ConsolidationService 执行 LLM 驱动的记忆巩固。
  */
 export async function consolidateMemories(
   userId: number
 ): Promise<number> {
-  const db = await getDb();
-  if (!db) return 0;
-
   try {
-    // 获取所有记忆
-    const allMemories = await searchMemories({
-      userId,
-      limit: 100,
-      minImportance: 0,
-    });
-
-    if (allMemories.length < 5) return 0;
-
-    // 按 versionGroup 分组，保留最新版本
-    const versionGroups = new Map<string, Memory[]>();
-    for (const memory of allMemories) {
-      if (memory.versionGroup) {
-        const group = versionGroups.get(memory.versionGroup) || [];
-        group.push(memory);
-        versionGroups.set(memory.versionGroup, group);
-      }
-    }
-
-    let consolidatedCount = 0;
-
-    // 对每个版本组，只保留最新的一条
-    for (const [group, mems] of Array.from(versionGroups.entries())) {
-      if (mems.length <= 1) continue;
-
-      // 按更新时间排序，保留最新
-      const sorted = mems.sort(
-        (a: Memory, b: Memory) =>
-          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      );
-
-      // 删除旧版本
-      for (let i = 1; i < sorted.length; i++) {
-        await deleteMemory(sorted[i].id);
-        consolidatedCount++;
-      }
-    }
-
-    console.log(
-      `[Memory] Consolidated ${consolidatedCount} duplicate memories for user ${userId}`
-    );
-    return consolidatedCount;
+    const result = await smartMemConsolidate(userId);
+    return result.memoriesConsolidated;
   } catch (error) {
     console.error("[Memory] Error consolidating memories:", error);
     return 0;
@@ -715,36 +715,15 @@ export async function consolidateMemories(
 }
 
 /**
- * 记忆遗忘（后台任务）
+ * 记忆遗忘（后台任务）—— SmartMem 增强版
  *
- * 删除低重要性、长期未访问的记忆。
+ * 基于艾宾浩斯遗忘曲线的指数衰减模型，动态调整记忆重要性分数。
+ * 现在委托给 SmartMem 的 ForgettingService 执行。
  */
 export async function forgetMemories(userId: number): Promise<number> {
-  const db = await getDb();
-  if (!db) return 0;
-
   try {
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-
-    const result = await db
-      .delete(memories)
-      .where(
-        and(
-          eq(memories.userId, userId),
-          sql`${memories.lastAccessedAt} < ${ninetyDaysAgo}`,
-          sql`${memories.importance} < 0.3`,
-          sql`${memories.accessCount} < 3`
-        )
-      );
-
-    const count = Number((result as any)[0]?.affectedRows) || 0;
-    if (count > 0) {
-      console.log(
-        `[Memory] Forgot ${count} old memories for user ${userId}`
-      );
-    }
-    return count;
+    const result = await applyForgettingDecay(userId);
+    return result.memoriesDecayed + result.memoriesRemoved;
   } catch (error) {
     console.error("[Memory] Error forgetting memories:", error);
     return 0;

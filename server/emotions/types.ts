@@ -1,8 +1,10 @@
 /**
- * Emotions Types — 情感表达系统类型定义
+ * Emotions Types — 情感表达系统类型定义 (SmartAgent4)
  *
- * 定义与 Emotions-Express 微服务交互所需的数据结构。
- * 来源：Emotions-Express 的 core/models.py 数据结构。
+ * 定义与 Emotions-System 微服务交互所需的数据结构。
+ * SmartAgent4 更新：适配新的 Emotions-System（Python）微服务。
+ *
+ * 来源：Emotions-System/core/models.py
  */
 
 // ==================== 情感与动作枚举 ====================
@@ -43,7 +45,7 @@ export interface EmotionAction {
  * 多模态片段
  *
  * 一段完整的多模态输出，包含文本、音频和动作指令。
- * 对应 Emotions-Express 的 MultimodalSegment。
+ * 兼容旧版 Emotions-Express 和新版 Emotions-System。
  */
 export interface MultimodalSegment {
   /** 纯文本内容（已去除标签） */
@@ -60,9 +62,31 @@ export interface MultimodalSegment {
 
 // ==================== API 请求/响应 ====================
 
-/** Emotions-Express 渲染请求 */
+/** Emotions-System TTS 合成请求 */
+export interface EmotionsTTSRequest {
+  /** 待合成的文本 */
+  text: string;
+  /** 情感类型 */
+  emotion?: string;
+  /** 语音指令（如"用欢快的语气"） */
+  instruction?: string;
+  /** 音色 ID */
+  voice_id?: string;
+}
+
+/** Emotions-System TTS 合成响应 */
+export interface EmotionsTTSResponse {
+  /** Base64 编码的音频数据 */
+  audio_base64: string;
+  /** 音频格式 */
+  format: string;
+}
+
+/**
+ * Emotions-System 渲染请求（兼容旧版）
+ */
 export interface EmotionsRenderRequest {
-  /** 待渲染的文本（可含 [tag:value] 标签） */
+  /** 待渲染的文本（可含 [emotion:value|instruction:text] 标签） */
   text: string;
   /** 会话 ID */
   sessionId: string;
@@ -70,7 +94,7 @@ export interface EmotionsRenderRequest {
   systemPrompt?: string;
 }
 
-/** Emotions-Express 流式响应事件 */
+/** Emotions-System 流式响应事件 */
 export interface EmotionsRenderResponse {
   /** 事件类型 */
   type: "segment" | "end" | "error" | "transcript" | "info";
@@ -82,7 +106,7 @@ export interface EmotionsRenderResponse {
 
 // ==================== 客户端配置 ====================
 
-/** Emotions-Express 客户端配置 */
+/** Emotions-System 客户端配置 */
 export interface EmotionsClientConfig {
   /** 服务基础 URL（如 http://localhost:8000） */
   baseUrl: string;

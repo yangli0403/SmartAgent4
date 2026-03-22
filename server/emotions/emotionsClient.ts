@@ -1,19 +1,19 @@
 /**
- * Emotions Express Client — 情感渲染客户端
+ * Emotions System Client — 情感语音合成客户端 (SmartAgent4)
  *
- * 与 Emotions-Express Python 微服务通信的 HTTP 客户端。
- * 支持同步渲染和流式渲染两种模式。
+ * 重写自 SmartAgent3 的 EmotionsExpressClient，对接新的 Emotions-System 微服务。
+ * 新微服务基于 Python，提供 /api/tts/synthesize 端点进行带情感的语音合成。
  *
- * 微服务端点（来源：Emotions-Express/main.py）：
- * - POST /api/parse  — 纯文本标签解析（不调用 LLM）
- * - POST /api/chat   — 单次对话渲染
- * - WS   /ws/chat    — 流式对话渲染
+ * 核心变更：
+ * - 解析 LLM 输出中的复合情感标签 [emotion:happy|instruction:用欢快的语气]
+ * - 通过 HTTP POST 调用 Emotions-System 的 TTS 接口
+ * - 组装多模态响应（文本 + 音频 Base64）
+ *
+ * 来源：Emotions-System/services/tts_service.py, Emotions-System/main.py
  */
 
 import type {
   MultimodalSegment,
-  EmotionsRenderRequest,
-  EmotionsRenderResponse,
   EmotionsClientConfig,
   EmotionType,
   EmotionAction,
@@ -22,56 +22,141 @@ import type {
 // ==================== 默认配置 ====================
 
 const DEFAULT_CONFIG: EmotionsClientConfig = {
-  baseUrl: process.env.EMOTIONS_EXPRESS_URL || "http://localhost:8000",
+  baseUrl: process.env.EMOTIONS_SYSTEM_URL || "http://localhost:8000",
   timeout: 30000,
-  enabled: process.env.EMOTIONS_EXPRESS_ENABLED !== "false",
+  enabled: process.env.EMOTIONS_SYSTEM_ENABLED !== "false",
   retryCount: 2,
   retryDelay: 1000,
 };
 
-// ==================== 接口定义 ====================
+// ==================== 复合标签解析 ====================
 
-export interface IEmotionsExpressClient {
-  /** 检查服务是否可用 */
-  isAvailable(): Promise<boolean>;
-
-  /** 渲染文本为多模态数据 */
-  render(text: string, sessionId: string): Promise<MultimodalSegment[]>;
-
-  /** 流式渲染文本为多模态数据 */
-  renderStream(
-    text: string,
-    sessionId: string
-  ): AsyncGenerator<MultimodalSegment, void, unknown>;
-
-  /** 解析文本中的情感标签（不调用 LLM） */
-  parseOnly(text: string): Promise<MultimodalSegment[]>;
+/**
+ * 复合情感标签的解析结果
+ */
+export interface ParsedEmotionTag {
+  emotion?: string;
+  instruction?: string;
+  [key: string]: string | undefined;
 }
 
-// ==================== 实现 ====================
+/**
+ * 解析文本中的复合情感标签
+ *
+ * 支持格式：
+ * - [emotion:happy|instruction:用欢快的语气] 文本内容
+ * - [emotion:sad] 文本内容
+ * - 纯文本（无标签）
+ *
+ * @returns 解析后的纯文本和标签键值对
+ */
+export function parseEmotionTags(text: string): {
+  cleanText: string;
+  tags: ParsedEmotionTag;
+  segments: Array<{ text: string; tags: ParsedEmotionTag }>;
+} {
+  const segments: Array<{ text: string; tags: ParsedEmotionTag }> = [];
 
-export class EmotionsExpressClient implements IEmotionsExpressClient {
+  // 匹配 [key:value|key:value] 格式的标签
+  const tagPattern = /\[([^\]]+)\]\s*/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let firstTags: ParsedEmotionTag = {};
+
+  while ((match = tagPattern.exec(text)) !== null) {
+    // 标签前的纯文本
+    if (match.index > lastIndex) {
+      const beforeText = text.slice(lastIndex, match.index).trim();
+      if (beforeText) {
+        segments.push({ text: beforeText, tags: { ...firstTags } });
+      }
+    }
+
+    // 解析标签内容
+    const tagContent = match[1];
+    const tags: ParsedEmotionTag = {};
+
+    // 支持 key:value 和 key:value|key:value 格式
+    const pairs = tagContent.split("|");
+    for (const pair of pairs) {
+      const colonIdx = pair.indexOf(":");
+      if (colonIdx > 0) {
+        const key = pair.slice(0, colonIdx).trim().toLowerCase();
+        const value = pair.slice(colonIdx + 1).trim();
+        tags[key] = value;
+      }
+    }
+
+    if (Object.keys(firstTags).length === 0) {
+      firstTags = { ...tags };
+    }
+
+    // 找到标签后面的文本（直到下一个标签或文本结尾）
+    lastIndex = tagPattern.lastIndex;
+    const nextMatch = tagPattern.exec(text);
+    const endIdx = nextMatch ? nextMatch.index : text.length;
+    tagPattern.lastIndex = lastIndex; // 恢复位置
+
+    const afterText = text.slice(lastIndex, endIdx).trim();
+    if (afterText) {
+      segments.push({ text: afterText, tags });
+    }
+  }
+
+  // 没有匹配到任何标签
+  if (segments.length === 0) {
+    const remaining = text.slice(lastIndex).trim();
+    if (remaining) {
+      segments.push({ text: remaining, tags: {} });
+    }
+  } else {
+    // 处理最后一段无标签文本
+    const remaining = text.slice(lastIndex).trim();
+    if (remaining && !segments.some((s) => s.text === remaining)) {
+      segments.push({ text: remaining, tags: firstTags });
+    }
+  }
+
+  const cleanText = segments.map((s) => s.text).join(" ");
+
+  return { cleanText, tags: firstTags, segments };
+}
+
+// ==================== TTS 请求/响应 ====================
+
+export interface TTSRequest {
+  text: string;
+  emotion?: string;
+  instruction?: string;
+  voiceId?: string;
+}
+
+export interface TTSResponse {
+  audioBase64: string;
+  format: string;
+}
+
+// ==================== 客户端实现 ====================
+
+export class EmotionsSystemClient {
   private config: EmotionsClientConfig;
   private _available: boolean | null = null;
   private _lastHealthCheck: number = 0;
-  private readonly HEALTH_CHECK_INTERVAL = 60000; // 1 分钟
+  private readonly HEALTH_CHECK_INTERVAL = 60000;
 
   constructor(config?: Partial<EmotionsClientConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     console.log(
-      `[EmotionsClient] Initialized: ${this.config.enabled ? "enabled" : "disabled"}, url=${this.config.baseUrl}`
+      `[EmotionsSystemClient] Initialized: ${this.config.enabled ? "enabled" : "disabled"}, url=${this.config.baseUrl}`
     );
   }
 
   /**
-   * 检查 Emotions-Express 服务是否可用
+   * 检查 Emotions-System 服务是否可用
    */
   async isAvailable(): Promise<boolean> {
-    if (!this.config.enabled) {
-      return false;
-    }
+    if (!this.config.enabled) return false;
 
-    // 使用缓存的健康检查结果
     const now = Date.now();
     if (
       this._available !== null &&
@@ -94,40 +179,23 @@ export class EmotionsExpressClient implements IEmotionsExpressClient {
       this._lastHealthCheck = now;
 
       console.log(
-        `[EmotionsClient] Health check: ${this._available ? "OK" : "FAILED"}`
+        `[EmotionsSystemClient] Health check: ${this._available ? "OK" : "FAILED"}`
       );
       return this._available;
     } catch (error) {
       this._available = false;
       this._lastHealthCheck = now;
       console.warn(
-        `[EmotionsClient] Health check failed: ${(error as Error).message}`
+        `[EmotionsSystemClient] Health check failed: ${(error as Error).message}`
       );
       return false;
     }
   }
 
   /**
-   * 渲染文本为多模态数据
-   *
-   * 调用 Emotions-Express 的 /api/chat 端点。
-   * 如果服务不可用，返回仅包含纯文本的降级结果。
+   * 调用 Emotions-System 的 TTS 接口合成语音
    */
-  async render(
-    text: string,
-    sessionId: string
-  ): Promise<MultimodalSegment[]> {
-    // 检查服务可用性
-    const available = await this.isAvailable();
-    if (!available) {
-      console.log(
-        "[EmotionsClient] Service unavailable, returning text-only fallback"
-      );
-      return this.createFallbackSegments(text);
-    }
-
-    const request: EmotionsRenderRequest = { text, sessionId };
-
+  async synthesize(request: TTSRequest): Promise<TTSResponse | null> {
     for (let attempt = 0; attempt <= this.config.retryCount; attempt++) {
       try {
         const controller = new AbortController();
@@ -136,12 +204,20 @@ export class EmotionsExpressClient implements IEmotionsExpressClient {
           this.config.timeout
         );
 
-        const response = await fetch(`${this.config.baseUrl}/api/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(request),
-          signal: controller.signal,
-        });
+        const response = await fetch(
+          `${this.config.baseUrl}/api/tts/synthesize`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: request.text,
+              emotion: request.emotion || "neutral",
+              instruction: request.instruction || "",
+              voice_id: request.voiceId || "default",
+            }),
+            signal: controller.signal,
+          }
+        );
 
         clearTimeout(timeoutId);
 
@@ -150,178 +226,78 @@ export class EmotionsExpressClient implements IEmotionsExpressClient {
         }
 
         const data = await response.json();
-        return this.parseRenderResponse(data);
+        return {
+          audioBase64: data.audio_base64 || data.audioBase64 || "",
+          format: data.format || "wav",
+        };
       } catch (error) {
         console.warn(
-          `[EmotionsClient] Render attempt ${attempt + 1} failed: ${(error as Error).message}`
+          `[EmotionsSystemClient] Synthesize attempt ${attempt + 1} failed: ${(error as Error).message}`
         );
-
         if (attempt < this.config.retryCount) {
           await this.sleep(this.config.retryDelay * (attempt + 1));
         }
       }
     }
 
-    // 所有重试失败，返回降级结果
-    console.error("[EmotionsClient] All render attempts failed, using fallback");
-    return this.createFallbackSegments(text);
+    return null;
   }
 
   /**
-   * 流式渲染文本为多模态数据
+   * 渲染带情感标签的文本为多模态片段
    *
-   * 通过 HTTP SSE 或轮询方式获取流式结果。
-   * 如果服务不可用，yield 降级结果。
+   * 主入口：解析标签 → 调用 TTS → 组装多模态响应
    */
-  async *renderStream(
+  async render(
     text: string,
-    sessionId: string
-  ): AsyncGenerator<MultimodalSegment, void, unknown> {
-    const available = await this.isAvailable();
-    if (!available) {
-      for (const segment of this.createFallbackSegments(text)) {
-        yield segment;
-      }
-      return;
-    }
-
-    try {
-      const request: EmotionsRenderRequest = { text, sessionId };
-
-      const response = await fetch(
-        `${this.config.baseUrl}/api/chat/stream`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "text/event-stream",
-          },
-          body: JSON.stringify(request),
-        }
-      );
-
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const jsonStr = line.slice(6).trim();
-            if (jsonStr === "[DONE]") return;
-
-            try {
-              const event: EmotionsRenderResponse = JSON.parse(jsonStr);
-              if (event.type === "segment" && event.segment) {
-                yield event.segment;
-              } else if (event.type === "end") {
-                return;
-              } else if (event.type === "error") {
-                console.error(
-                  `[EmotionsClient] Stream error: ${event.message}`
-                );
-                return;
-              }
-            } catch {
-              // 跳过无法解析的行
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.warn(
-        `[EmotionsClient] Stream failed, using fallback: ${(error as Error).message}`
-      );
-      for (const segment of this.createFallbackSegments(text)) {
-        yield segment;
-      }
-    }
-  }
-
-  /**
-   * 解析文本中的情感标签（不调用 LLM）
-   *
-   * 调用 Emotions-Express 的 /api/parse 端点。
-   */
-  async parseOnly(text: string): Promise<MultimodalSegment[]> {
+    _sessionId: string
+  ): Promise<MultimodalSegment[]> {
     const available = await this.isAvailable();
     if (!available) {
       return this.createFallbackSegments(text);
     }
 
-    try {
-      const response = await fetch(`${this.config.baseUrl}/api/parse`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+    const { segments } = parseEmotionTags(text);
+    const results: MultimodalSegment[] = [];
+
+    for (const segment of segments) {
+      const emotion = this.normalizeEmotion(segment.tags.emotion);
+
+      // 调用 TTS
+      const ttsResult = await this.synthesize({
+        text: segment.text,
+        emotion: segment.tags.emotion,
+        instruction: segment.tags.instruction,
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      return this.parseRenderResponse(data);
-    } catch (error) {
-      console.warn(
-        `[EmotionsClient] Parse failed: ${(error as Error).message}`
-      );
-      return this.createFallbackSegments(text);
+      results.push({
+        text: segment.text,
+        audioBase64: ttsResult?.audioBase64 || undefined,
+        audioFormat: ttsResult?.format || "wav",
+        emotion,
+        actions: [],
+      });
     }
+
+    return results.length > 0 ? results : this.createFallbackSegments(text);
+  }
+
+  /**
+   * 解析文本中的情感标签（不调用 TTS）
+   */
+  async parseOnly(text: string): Promise<MultimodalSegment[]> {
+    const { segments } = parseEmotionTags(text);
+
+    return segments.map((segment) => ({
+      text: segment.text,
+      audioFormat: "wav",
+      emotion: this.normalizeEmotion(segment.tags.emotion),
+      actions: [],
+    }));
   }
 
   // ==================== 私有方法 ====================
 
-  /**
-   * 解析渲染响应数据
-   */
-  private parseRenderResponse(data: unknown): MultimodalSegment[] {
-    if (Array.isArray(data)) {
-      return data.map((item: any) => this.normalizeSegment(item));
-    }
-
-    if (data && typeof data === "object" && "segments" in data) {
-      return ((data as any).segments || []).map((item: any) =>
-        this.normalizeSegment(item)
-      );
-    }
-
-    // 单个片段
-    if (data && typeof data === "object" && "text" in data) {
-      return [this.normalizeSegment(data as any)];
-    }
-
-    console.warn("[EmotionsClient] Unexpected response format:", data);
-    return [];
-  }
-
-  /**
-   * 标准化多模态片段
-   */
-  private normalizeSegment(raw: any): MultimodalSegment {
-    return {
-      text: raw.text || "",
-      audioBase64: raw.audio_base64 || raw.audioBase64 || undefined,
-      audioFormat: raw.audio_format || raw.audioFormat || "mp3",
-      emotion: this.normalizeEmotion(raw.emotion),
-      actions: this.normalizeActions(raw.actions || []),
-    };
-  }
-
-  /**
-   * 标准化情感类型
-   */
   private normalizeEmotion(emotion: unknown): EmotionType {
     const validEmotions: EmotionType[] = [
       "neutral",
@@ -332,49 +308,27 @@ export class EmotionsExpressClient implements IEmotionsExpressClient {
       "fearful",
       "disgusted",
     ];
-    if (typeof emotion === "string" && validEmotions.includes(emotion as EmotionType)) {
+    if (
+      typeof emotion === "string" &&
+      validEmotions.includes(emotion as EmotionType)
+    ) {
       return emotion as EmotionType;
     }
     return "neutral";
   }
 
-  /**
-   * 标准化动作列表
-   */
-  private normalizeActions(actions: unknown[]): EmotionAction[] {
-    if (!Array.isArray(actions)) return [];
-
-    return actions
-      .filter((a): a is Record<string, unknown> => typeof a === "object" && a !== null)
-      .map((a) => ({
-        type: (a.type as EmotionAction["type"]) || "expression",
-        value: String(a.value || ""),
-        duration: typeof a.duration === "number" ? a.duration : undefined,
-      }));
-  }
-
-  /**
-   * 创建降级的纯文本片段
-   *
-   * 当 Emotions-Express 不可用时，去除标签并返回纯文本。
-   */
   private createFallbackSegments(text: string): MultimodalSegment[] {
-    // 去除 [tag:value] 标签
-    const cleanText = text.replace(/\[(\w+):([^\]]+)\]/g, "").trim();
-
+    const { cleanText } = parseEmotionTags(text);
     return [
       {
         text: cleanText || text,
-        audioFormat: "mp3",
+        audioFormat: "wav",
         emotion: "neutral" as EmotionType,
         actions: [],
       },
     ];
   }
 
-  /**
-   * 延时工具
-   */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -382,14 +336,14 @@ export class EmotionsExpressClient implements IEmotionsExpressClient {
 
 // ==================== 单例工厂 ====================
 
-let _instance: EmotionsExpressClient | null = null;
+let _instance: EmotionsSystemClient | null = null;
 
 /**
- * 获取 EmotionsExpressClient 单例
+ * 获取 EmotionsSystemClient 单例
  */
-export function getEmotionsClient(): EmotionsExpressClient {
+export function getEmotionsClient(): EmotionsSystemClient {
   if (!_instance) {
-    _instance = new EmotionsExpressClient();
+    _instance = new EmotionsSystemClient();
   }
   return _instance;
 }

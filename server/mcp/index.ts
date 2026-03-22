@@ -15,6 +15,15 @@
 // 导入工具模块
 import { fileSystemTools, fileSystemToolsServerCode } from './fileSystemTools';
 import { appBrowserTools, appBrowserToolsServerCode } from './appBrowserTools';
+import { analyzeDirectoryTool, findDuplicatesTool, deleteFilesTool, moveFilesTool, fileOrganizerServerCode } from './fileOrganizerTools';
+
+// 文件整理大师工具列表
+export const fileOrganizerTools = [
+  analyzeDirectoryTool,
+  findDuplicatesTool,
+  deleteFilesTool,
+  moveFilesTool,
+];
 
 // ============== 工具定义汇总 ==============
 
@@ -24,6 +33,7 @@ import { appBrowserTools, appBrowserToolsServerCode } from './appBrowserTools';
 export const allTools = [
   ...fileSystemTools,
   ...appBrowserTools,
+  ...fileOrganizerTools,
 ];
 
 /**
@@ -32,6 +42,7 @@ export const allTools = [
 export const toolsByCategory = {
   fileSystem: fileSystemTools,
   appBrowser: appBrowserTools,
+  fileOrganizer: fileOrganizerTools,
 };
 
 /**
