@@ -14,4 +14,6 @@ export const ENV = {
   // MCP Server API Keys
   amapApiKey: process.env.AMAP_API_KEY ?? "",
   neteaseApiKey: process.env.NETEASE_MUSIC_API_KEY ?? "",
+  /** 百炼 DashScope API Key（流式语音识别等） */
+  dashscopeApiKey: process.env.DASHSCOPE_API_KEY ?? "",
 };

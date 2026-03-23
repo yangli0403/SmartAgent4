@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import AssistantPanel from "@/components/cockpit/AssistantPanel";
 import MemoryCards from "@/components/cockpit/MemoryCards";
+import { RealtimeAsrSession } from "@/lib/realtimeAsrStream";
 
 export default function Cockpit() {
   const { user, isAuthenticated } = useAuth();
@@ -34,6 +35,8 @@ export default function Cockpit() {
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [isMicActive, setIsMicActive] = useState(false);
+  const asrSessionRef = useRef<RealtimeAsrSession | null>(null);
+  const asrCommittedRef = useRef("");
   // 人格切换状态
   const [characterId, setCharacterId] = useState<string>("xiaozhi");
 
@@ -109,6 +112,13 @@ export default function Cockpit() {
     hasInitialHistorySynced.current = false;
   }, [currentSessionId]);
 
+  useEffect(() => {
+    return () => {
+      void asrSessionRef.current?.stop();
+      asrSessionRef.current = null;
+    };
+  }, []);
+
   // ==================== 事件处理 ====================
 
   const handleSend = () => {
@@ -135,10 +145,47 @@ export default function Cockpit() {
     setMessages([]);
   };
 
-  const toggleMic = () => {
-    setIsMicActive(!isMicActive);
-    if (!isMicActive) {
-      toast.info("语音输入功能开发中...");
+  const toggleMic = async () => {
+    if (isMicActive) {
+      try {
+        await asrSessionRef.current?.stop();
+      } finally {
+        asrSessionRef.current = null;
+        setIsMicActive(false);
+      }
+      return;
+    }
+
+    asrCommittedRef.current = message;
+    const session = new RealtimeAsrSession({
+      onPartial: (text, sentenceEnd) => {
+        if (sentenceEnd) {
+          asrCommittedRef.current = (asrCommittedRef.current + text).trimEnd();
+          setMessage(asrCommittedRef.current);
+        } else {
+          setMessage(asrCommittedRef.current + text);
+        }
+      },
+      onError: err => {
+        toast.error(err);
+        void asrSessionRef.current?.stop();
+        asrSessionRef.current = null;
+        setIsMicActive(false);
+      },
+      onDone: () => {
+        asrSessionRef.current = null;
+        setIsMicActive(false);
+      },
+    });
+    asrSessionRef.current = session;
+    setIsMicActive(true);
+    try {
+      await session.start();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "无法启动语音识别";
+      toast.error(msg);
+      asrSessionRef.current = null;
+      setIsMicActive(false);
     }
   };
 

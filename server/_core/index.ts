@@ -12,6 +12,7 @@ import sequentialThinkingRouter from "../routers/sequentialThinkingRouter";
 import chatRouterEnhanced from "../routers/chatRouterEnhanced";
 // 网易云音乐 MCP 内嵌服务
 import { startNeteaseMCPServer, NETEASE_MCP_PORT } from "../mcp/netease/index";
+import { attachAsrWebSocket } from "../asr/asrStreamSocket";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -55,6 +56,7 @@ async function startServer() {
 
   const app = express();
   const server = createServer(app);
+  attachAsrWebSocket(server);
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
