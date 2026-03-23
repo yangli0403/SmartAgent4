@@ -21,10 +21,20 @@ import type {
 
 // ==================== 默认配置 ====================
 
+const EMOTIONS_BASE_URL =
+  process.env.EMOTIONS_SYSTEM_URL ||
+  process.env.EMOTIONS_EXPRESS_URL ||
+  "http://localhost:8000";
+
+const EMOTIONS_ENABLED =
+  (process.env.EMOTIONS_SYSTEM_ENABLED ??
+    process.env.EMOTIONS_EXPRESS_ENABLED ??
+    "true") !== "false";
+
 const DEFAULT_CONFIG: EmotionsClientConfig = {
-  baseUrl: process.env.EMOTIONS_SYSTEM_URL || "http://localhost:8000",
+  baseUrl: EMOTIONS_BASE_URL,
   timeout: 30000,
-  enabled: process.env.EMOTIONS_SYSTEM_ENABLED !== "false",
+  enabled: EMOTIONS_ENABLED,
   retryCount: 2,
   retryDelay: 1000,
 };
@@ -347,3 +357,12 @@ export function getEmotionsClient(): EmotionsSystemClient {
   }
   return _instance;
 }
+
+// ==================== 兼容导出（旧命名） ====================
+
+/**
+ * 兼容 SmartAgent3 旧命名，避免现有调用方和测试中断。
+ * 行为与 EmotionsSystemClient 完全一致。
+ */
+export { EmotionsSystemClient as EmotionsExpressClient };
+export type IEmotionsExpressClient = EmotionsSystemClient;

@@ -3,7 +3,11 @@
  */
 
 export * from "./types";
-export { EmotionsExpressClient, getEmotionsClient } from "./emotionsClient";
+export {
+  EmotionsSystemClient,
+  EmotionsExpressClient,
+  getEmotionsClient,
+} from "./emotionsClient";
 export type { IEmotionsExpressClient } from "./emotionsClient";
 export {
   getEmotionTagInstructions,
