@@ -1,46 +1,67 @@
 graph TD
-    %% 核心 Agent 引擎
-    subgraph AgentEngine [SmartAgent4 核心引擎]
-        Supervisor[Supervisor 编排器]
-        FileAgent[FileAgent 文件领域代理]
-        TaskRouter[任务路由模块]
+    subgraph Client["前端客户端 (React + Vite)"]
+        UI[用户界面]
+        Chat[对话组件]
+        Cockpit[驾驶舱组件]
     end
 
-    %% 记忆系统 (SmartMem 集成)
-    subgraph MemorySystem [记忆系统 SmartMem]
-        MemDB[(Memories 数据库)]
-        HybridSearch[混合检索模块 BM25+Vector]
-        Consolidation[记忆巩固服务]
-        Forgetting[动态遗忘服务]
+    subgraph API_Layer["API 层 (tRPC)"]
+        Router[主路由 routers.ts]
+        ChatRouter[对话路由]
+        MemoryRouter[记忆路由]
     end
 
-    %% 情感与语音系统 (Emotions-System 集成)
-    subgraph EmotionSystem [情感与语音系统]
-        EmotionClient[EmotionsSystemClient]
-        TTS_Service[[外部 Emotions-System 微服务]]
+    subgraph Agent_Engine["Agent 引擎 (Supervisor 架构)"]
+        Context[上下文增强 ContextEnrichNode]
+        Classify[任务分类 ClassifyNode]
+        Plan[任务规划 PlanNode]
+        Execute[任务执行 ExecuteNode]
+        Respond[回复生成 RespondNode]
+        Extract[记忆提取 MemoryExtractionNode]
+        Reflect[反思与进化 ReflectionNode]
     end
 
-    %% 文件整理大师 (MCP 扩展)
-    subgraph FileOrganizer [文件整理大师 MCP]
-        MCP_Manager[MCP Manager]
-        FileTools[文件系统工具集]
-        Analyzer[目录分析与同名汇总]
-        Cleaner[安全清理与移动]
+    subgraph Personality_System["人格系统"]
+        Engine[人格引擎 PersonalityEngine]
+        PromptBuilder[Prompt 构建器]
     end
 
-    %% 交互关系
-    Supervisor -->|调用| TaskRouter
-    TaskRouter -->|路由到| FileAgent
-    FileAgent -->|调用| MCP_Manager
-    MCP_Manager -->|执行| FileTools
-    FileTools --> Analyzer
-    FileTools --> Cleaner
+    subgraph Memory_System["记忆系统"]
+        WorkingMem[工作记忆 WorkingMemory]
+        HybridSearch[混合检索 HybridSearch]
+        Consolidation[记忆巩固 ConsolidationService]
+    end
 
-    Supervisor -->|读写| HybridSearch
-    HybridSearch --> MemDB
-    Consolidation -->|定时提炼| MemDB
-    Forgetting -->|衰减计算| MemDB
+    subgraph Tool_System["工具系统 (MCP)"]
+        MCPManager[MCP 管理器]
+        ToolRegistry[工具注册表 ToolRegistry]
+        Tools[具体工具集]
+    end
 
-    Supervisor -->|输出带情感文本| EmotionClient
-    EmotionClient -->|HTTP POST| TTS_Service
-    TTS_Service -->|返回音频流| EmotionClient
+    subgraph Data_Layer["数据访问层 (Drizzle ORM)"]
+        DB[数据库操作 db.ts]
+        Schema[数据模型 schema.ts]
+    end
+
+    subgraph Database["底层数据库"]
+        PostgreSQL[(PostgreSQL 15)]
+    end
+
+    %% 数据流与依赖关系
+    UI -->|用户输入| Chat
+    Chat -->|tRPC 调用| ChatRouter
+    ChatRouter -->|启动对话| Agent_Engine
+
+    Context -->|获取画像| Memory_System
+    Context -->|获取 Prompt| Personality_System
+    Classify -->|查询效用分数| Tool_System
+    Execute -->|调用工具| Tool_System
+    Extract -->|异步写入| Memory_System
+    Reflect -->|更新效用分数| Tool_System
+    Reflect -->|更新 Prompt 补丁| Personality_System
+
+    Memory_System -->|CRUD| Data_Layer
+    Personality_System -->|读取配置| Data_Layer
+    Agent_Engine -->|保存对话| Data_Layer
+
+    Data_Layer -->|SQL 查询| PostgreSQL
