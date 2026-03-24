@@ -1,53 +1,58 @@
-# SmartAgent4 仓库分析与需求范围界定
+# SmartAgent4 仓库分析报告
 
-**文档状态**：第1阶段产出
-**目标**：基于 SmartAgent3 现有架构，集成 SmartMem 记忆系统、Emotions-System TTS 语音合成、以及文件整理大师（含同名文件汇总）三大核心功能。
+## 1. 源代码阅读与初步分析
 
-## 1. 现有系统分析 (SmartAgent3)
+通过对 SmartAgent4 仓库（`windows-compat` 分支）的源代码阅读，我们识别出以下关键组件及其主要职责：
 
-SmartAgent3 是一个基于 TypeScript 和 LangGraph 概念构建的智能 Agent 系统，具备以下核心特征：
+### 1.1 核心组件分析
 
-*   **核心架构**：采用 Supervisor-Worker 模式（`server/agent/supervisor`），包含分类、计划、执行、反思等节点。
-*   **MCP 框架**：具备完整的本地 MCP 工具注册与调用机制（`server/mcp`），目前支持基础的文件系统操作（搜索、读取、打开、创建、复制）和浏览器控制。
-*   **记忆系统**：当前实现了基础的向量检索和对话提取（`server/memory/memorySystem.ts`），但缺乏高级的巩固、遗忘和混合检索机制。
-*   **情感表达**：现有的 `emotionsClient.ts` 仅支持简单的文本标签解析，未对接真实的语音合成微服务。
+- **数据库与 ORM 层 (`drizzle/schema.ts`, `server/db.ts`)**
+  - **职责**：定义了用户、偏好、记忆、对话等核心数据模型，并提供数据库连接和基础 CRUD 操作。
+  - **当前状态**：使用 MySQL 作为底层数据库，依赖 `drizzle-orm/mysql2` 和 `mysql2` 驱动。使用了 MySQL 特有的 `autoincrement()`、`onUpdateNow()` 和 `onDuplicateKeyUpdate` 等语法。
 
-## 2. 新增功能需求分析
+- **记忆系统 (`server/memory/memorySystem.ts`, `server/memory/consolidationService.ts`)**
+  - **职责**：实现三层记忆架构（工作记忆、记忆提取、长期记忆）。包含从对话中提取记忆、记忆搜索、记忆巩固等功能。
+  - **当前状态**：记忆提取管道（`extractMemoriesFromConversation`）目前缺乏噪声过滤，且 Prompt 提取规则较为基础。数据库插入操作依赖 MySQL 的 `insertId`。
 
-### 2.1 SmartMem 记忆系统集成
-*   **需求描述**：将 SmartMem 的高级记忆特性内嵌到 SmartAgent4 中。
-*   **核心功能**：
-    *   **混合检索**：支持 BM25 + 向量检索双路召回，并可通过 LLM 进行二次综合推理（Reflect）。
-    *   **记忆巩固**：通过聚类和 LLM 提炼，将零散的情景记忆升华为高阶的语义记忆和行为模式。
-    *   **动态遗忘**：采用基于艾宾浩斯遗忘曲线的指数衰减模型，动态调整记忆重要性。
-    *   **时序有效性**：支持为记忆设置生效和失效时间。
+- **人格引擎 (`server/personality/personalityEngine.ts`)**
+  - **职责**：管理 AI 人格配置，构建动态 System Prompt。
+  - **当前状态**：`buildSystemPrompt` 方法按固定分段组装 Prompt，目前没有版本控制或动态补丁机制。
 
-### 2.2 Emotions-System TTS 语音合成集成
-*   **需求描述**：对接外部 Emotions-System 微服务，实现带情感的语音合成。
-*   **核心功能**：
-    *   **复合标签解析**：解析 LLM 输出的复合情感标签（如 `[emotion:happy|instruction:...]`）。
-    *   **微服务对接**：通过 HTTP/WebSocket 调用 Emotions-System 的 `/api/tts/synthesize` 接口。
-    *   **多模态组装**：将返回的音频数据（Base64/URL）与文本一起组装成前端所需的 `MultimodalSegment`。
+- **任务分类与路由 (`server/agent/supervisor/classifyNode.ts`)**
+  - **职责**：使用 LLM 对用户输入进行领域分类和复杂度判断，决定后续的执行路径。
+  - **当前状态**：分类逻辑基于固定的 Prompt，未引入工具效用分数（Utility Score）或历史执行反馈。
 
-### 2.3 文件整理大师（含同名文件汇总）
-*   **需求描述**：扩展现有的文件系统 MCP 工具，提供高级的目录分析和清理能力，特别是针对下载目录。
-*   **核心功能**：
-    *   **目录分析与统计**：扫描指定目录，按文件类型、大小区间进行统计汇总。
-    *   **同名文件汇总**：扫描并找出文件名相同（或高度相似）的文件，列出它们的路径、大小和修改时间。
-    *   **重复文件检测**：基于文件大小和哈希值找出完全重复的文件。
-    *   **交互式清理工作流**：Agent 扫描后向用户展示可清理/合并的文件列表，**必须在用户确认后**才能调用删除或移动工具。
-    *   **安全删除与移动**：新增 `delete_files` 和 `move_files` MCP 工具。
+- **工具注册表 (`server/mcp/toolRegistry.ts`, `server/mcp/mcpManager.ts`)**
+  - **职责**：统一管理 MCP Server 提供的工具，支持动态注册和调用。
+  - **当前状态**：工具注册表仅包含基础元数据，缺乏效用分数、成功率统计等用于路由进化的关键指标。
 
-## 3. 架构演进建议
+### 1.2 架构模式与代码质量
 
-为了实现上述需求，SmartAgent4 的架构演进策略如下：
+- **架构模式**：项目采用了基于 Supervisor 的多 Agent 协作架构，结合了 LangGraph 进行流程编排。后端使用 tRPC 提供类型安全的 API。
+- **代码质量**：代码结构清晰，模块化程度高，使用了 TypeScript 进行严格的类型检查。
+- **测试覆盖率**：项目中包含 `tests/` 目录，涵盖了单元测试和集成测试，但具体覆盖率需进一步运行测试套件确认。
 
-| 维度 | 演进策略 | 理由 |
-| :--- | :--- | :--- |
-| **记忆系统** | **代码级内嵌**。扩展 `memories` 数据库表，在 `memorySystem.ts` 中引入混合检索和遗忘算法。 | 两者技术栈一致（TypeScript + Drizzle），内嵌性能最好，且易于与现有 Agent 上下文结合。 |
-| **语音合成** | **独立微服务对接**。重写 `emotionsClient.ts` 作为 HTTP 客户端。 | Emotions-System 强依赖 Python 生态，用 TS 重写成本极高，作为微服务对接最符合解耦原则。 |
-| **文件整理** | **原生 MCP 扩展 + 任务路由增强**。在 `fileSystemTools.ts` 新增分析、查重、删除工具；在 `crossDomainTask.ts` 或任务入口增加清理意图的识别。 | 充分利用现有的 MCP 框架和 ReACT 循环，只需做“加法”，无需重构核心 Agent 引擎。 |
+## 2. 深度对比与总结
 
-## 4. 结论与下一步计划
+针对本次迭代的三个核心功能点，我们进行了现状与目标的对比分析：
 
-SmartAgent4 的需求范围已明确，技术可行性高。下一步将进入**第2阶段：架构与设计**，重点输出包含三大功能模块交互的系统架构图（Mermaid）和详细的模块职责定义。
+| 维度 | 当前状态 (SmartAgent4 现状) | 目标状态 (迭代后) |
+|------|---------------------------|-------------------|
+| **底层数据库** | MySQL 8.0，使用 `mysql2` 驱动和 `drizzle-orm/mysql-core` | PostgreSQL 15，使用 `postgres` 驱动和 `drizzle-orm/pg-core` |
+| **记忆提取管道** | 无噪声预过滤，Prompt 缺乏时间锚定和意图区分 | 四层过滤机制，增强版 Prompt（强制时间锚定、结果优于意图等），动态阈值去重 |
+| **自进化闭环** | 缺乏执行反馈机制，Prompt 和路由策略固定 | 引入异步反思机制，实现 Prompt 进化（版本控制）、路由进化（工具效用分数）和技能进化 |
+| **数据库操作** | 依赖 `insertId`，使用 `onDuplicateKeyUpdate` | 使用 `.returning()` 获取插入 ID，使用 `onConflictDoUpdate` 处理冲突 |
+
+### 2.1 改进建议
+
+1. **数据库迁移**：需要全面替换依赖、修改 Drizzle 配置文件、更新 Schema 语法，并仔细调整所有涉及数据库插入和更新的业务代码（特别是 `server/db.ts`、`memorySystem.ts` 和 `consolidationService.ts`）。
+2. **记忆提取优化**：在 `memoryExtractionNode.ts` 或 `memorySystem.ts` 中引入四层过滤逻辑，并更新 `MEMORY_EXTRACTION_PROMPT`。
+3. **自进化闭环**：
+   - 在 `personalityEngine.ts` 中引入 Prompt 版本控制。
+   - 在 `toolRegistry.ts` 和 `mcpManager.ts` 中增加工具效用分数的记录和更新逻辑。
+   - 在 `classifyNode.ts` 中引入基于效用分数的加权路由策略。
+   - 新增反思节点（Reflection Node），在任务执行后异步分析结果并触发进化。
+
+## 3. 结论
+
+SmartAgent4 项目具备良好的模块化基础，本次迭代的三个功能点虽然涉及核心底层逻辑（如数据库和记忆系统），但可以通过针对性的修改和扩展来实现。建议按照“数据库迁移 -> 记忆提取优化 -> 自进化闭环落地”的顺序逐步推进，确保每一步的稳定性。
