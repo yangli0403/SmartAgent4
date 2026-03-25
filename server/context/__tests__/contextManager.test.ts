@@ -2,16 +2,36 @@
  * ContextManager 单元测试
  *
  * 测试用户上下文管理器的位置缓存、IP 定位和偏好加载。
+ *
+ * 修复说明（2026-03-25）：
+ * - 原测试未 mock global.fetch，导致 getLocationByIP() 中的 ip-api.com
+ *   降级逻辑在有网络环境中真正发起 HTTP 请求，返回真实位置而非 undefined。
+ * - 修复方案：在 beforeEach 中 mock global.fetch 使其默认拒绝连接，
+ *   确保测试与外部网络完全隔离。
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ContextManager } from "../contextManager";
 import type { UserLocation } from "../../agent/supervisor/state";
 
+// ==================== Mock global.fetch ====================
+
+const mockFetch = vi.fn();
+
 describe("ContextManager", () => {
   let manager: ContextManager;
+  const originalFetch = global.fetch;
 
   beforeEach(() => {
+    vi.clearAllMocks();
+    // 默认 fetch 拒绝连接，隔离外部 API（ip-api.com）
+    mockFetch.mockRejectedValue(new Error("Network disabled in test"));
+    global.fetch = mockFetch as unknown as typeof fetch;
     manager = new ContextManager();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
   // ==================== getContext ====================
@@ -87,6 +107,7 @@ describe("ContextManager", () => {
 
   describe("getLocation", () => {
     it("无缓存且无 MCP 时应返回 undefined", async () => {
+      // fetch 已被 mock 为拒绝连接，ip-api.com 降级也会失败
       const loc = await manager.getLocation("unknown-user");
       expect(loc).toBeUndefined();
     });
@@ -116,7 +137,7 @@ describe("ContextManager", () => {
       cached.obtainedAt = new Date(Date.now() - 60 * 60 * 1000); // 1小时前
 
       const loc = await manager.getLocation("user-1");
-      // 无 MCP，IP 定位失败，应返回过期缓存
+      // 无 MCP，IP 定位失败（fetch 被 mock），应返回过期缓存
       expect(loc).toBeDefined();
       expect(loc!.city).toBe("北京");
     });
@@ -126,6 +147,7 @@ describe("ContextManager", () => {
 
   describe("getLocationByIP", () => {
     it("无 MCP callTool 时应返回 undefined", async () => {
+      // fetch 被 mock 为拒绝连接，ip-api.com 降级也会失败
       const loc = await manager.getLocationByIP();
       expect(loc).toBeUndefined();
     });
@@ -154,6 +176,7 @@ describe("ContextManager", () => {
       const mockCallTool = vi.fn().mockRejectedValue(new Error("timeout"));
       manager.setMCPCallTool(mockCallTool);
 
+      // MCP 失败 → 降级到 ip-api.com → fetch 被 mock 拒绝 → 返回 undefined
       const loc = await manager.getLocationByIP();
       expect(loc).toBeUndefined();
     });
@@ -162,8 +185,30 @@ describe("ContextManager", () => {
       const mockCallTool = vi.fn().mockResolvedValue("not json");
       manager.setMCPCallTool(mockCallTool);
 
+      // MCP 返回无效数据 → 降级到 ip-api.com → fetch 被 mock 拒绝 → 返回 undefined
       const loc = await manager.getLocationByIP();
       expect(loc).toBeUndefined();
+    });
+
+    it("ip-api.com 返回有效数据时应解析位置", async () => {
+      // 模拟 ip-api.com 返回成功
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          status: "success",
+          city: "上海",
+          regionName: "上海",
+          country: "中国",
+          lat: 31.23,
+          lon: 121.47,
+        }),
+      });
+
+      const loc = await manager.getLocationByIP();
+      expect(loc).toBeDefined();
+      expect(loc!.city).toBe("上海");
+      expect(loc!.latitude).toBe(31.23);
+      expect(loc!.longitude).toBe(121.47);
     });
   });
 
