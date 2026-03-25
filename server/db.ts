@@ -1,5 +1,16 @@
+/**
+ * 数据库连接 & CRUD 模块 — PostgreSQL 版
+ *
+ * 从 MySQL (mysql2 + drizzle-orm/mysql2) 迁移至 PostgreSQL (postgres + drizzle-orm/postgres-js)。
+ * 主要变更：
+ *   1. 驱动替换：mysql2 → postgres
+ *   2. upsert 语法：onDuplicateKeyUpdate → onConflictDoUpdate
+ *   3. 插入返回：result[0].insertId → .returning()
+ */
+
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import {
   InsertUser,
   users,
@@ -16,19 +27,57 @@ import {
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
+let _sql: ReturnType<typeof postgres> | null = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
+/**
+ * 获取数据库实例（懒初始化）
+ */
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
-    try {
-      _db = drizzle(process.env.DATABASE_URL);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
-    }
+  if (_db) return _db;
+
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    console.warn(
+      "[DB] DATABASE_URL not set — running in memory-only mode (conversations will not persist)"
+    );
+    return null;
   }
-  return _db;
+
+  try {
+    _sql = postgres(url, {
+      max: 10,
+      idle_timeout: 20,
+      connect_timeout: 10,
+    });
+
+    _db = drizzle(_sql);
+
+    // 验证连接
+    await _sql`SELECT 1`;
+    console.log("[DB] PostgreSQL connected successfully");
+    return _db;
+  } catch (error) {
+    const err = error as { message?: string };
+    console.error("[DB] PostgreSQL connection failed:", err.message || error);
+    _db = null;
+    _sql = null;
+    return null;
+  }
 }
+
+/**
+ * 关闭数据库连接
+ */
+export async function closeDb() {
+  if (_sql) {
+    await _sql.end();
+    _sql = null;
+    _db = null;
+    console.log("[DB] PostgreSQL connection closed");
+  }
+}
+
+// ==================== 用户 ====================
 
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) {
@@ -80,9 +129,14 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.lastSignedIn = new Date();
     }
 
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
-      set: updateSet,
-    });
+    // PostgreSQL: onConflictDoUpdate 替代 MySQL 的 onDuplicateKeyUpdate
+    await db
+      .insert(users)
+      .values(values)
+      .onConflictDoUpdate({
+        target: users.openId,
+        set: updateSet,
+      });
   } catch (error) {
     console.error("[Database] Failed to upsert user:", error);
     throw error;
@@ -97,27 +151,31 @@ export async function getUserByOpenId(openId: string) {
   }
 
   try {
-  const result = await db
-    .select()
-    .from(users)
-    .where(eq(users.openId, openId))
-    .limit(1);
+    const result = await db
+      .select()
+      .from(users)
+      .where(eq(users.openId, openId))
+      .limit(1);
 
-  return result.length > 0 ? result[0] : undefined;
+    return result.length > 0 ? result[0] : undefined;
   } catch (error: any) {
     console.error("[Database] Error getting user by openId:", error);
-    // 如果是表不存在错误，提供更友好的提示
-    if (error.message?.includes("doesn't exist") || error.message?.includes("Table") || error.code === "ER_NO_SUCH_TABLE") {
+    // PostgreSQL 表不存在错误码为 42P01
+    if (
+      error.message?.includes("does not exist") ||
+      error.code === "42P01"
+    ) {
       console.error("[Database] 数据库表不存在，请运行: pnpm db:push");
-      throw new Error("数据库表不存在，请先运行 'pnpm db:push' 创建数据库表");
+      throw new Error(
+        "数据库表不存在，请先运行 'pnpm db:push' 创建数据库表"
+      );
     }
     throw error;
   }
 }
 
-/**
- * Get or create user preferences
- */
+// ==================== 用户偏好 ====================
+
 export async function getUserPreferences(
   userId: number
 ): Promise<UserPreference | null> {
@@ -132,10 +190,15 @@ export async function getUserPreferences(
 
   if (result.length > 0) {
     const prefs = result[0];
-    // 确保 notificationPreference 是对象而不是字符串
-    if (prefs.notificationPreference && typeof prefs.notificationPreference === 'string') {
+    // PostgreSQL jsonb 已自动解析，但保留兼容处理
+    if (
+      prefs.notificationPreference &&
+      typeof prefs.notificationPreference === "string"
+    ) {
       try {
-        (prefs as any).notificationPreference = JSON.parse(prefs.notificationPreference);
+        (prefs as any).notificationPreference = JSON.parse(
+          prefs.notificationPreference
+        );
       } catch (e) {
         (prefs as any).notificationPreference = {
           taskReminders: true,
@@ -171,9 +234,6 @@ export async function getUserPreferences(
   return newResult[0] || null;
 }
 
-/**
- * Update user preferences
- */
 export async function updateUserPreferences(
   userId: number,
   updates: Partial<InsertUserPreference>
@@ -182,17 +242,24 @@ export async function updateUserPreferences(
   if (!db) return false;
 
   try {
-    // 确保 notificationPreference 是对象而不是字符串
     const cleanUpdates = { ...updates };
-    if (cleanUpdates.notificationPreference && typeof cleanUpdates.notificationPreference === 'string') {
+    if (
+      cleanUpdates.notificationPreference &&
+      typeof cleanUpdates.notificationPreference === "string"
+    ) {
       try {
-        cleanUpdates.notificationPreference = JSON.parse(cleanUpdates.notificationPreference);
+        cleanUpdates.notificationPreference = JSON.parse(
+          cleanUpdates.notificationPreference
+        );
       } catch (e) {
-        console.error("[Database] Failed to parse notificationPreference:", e);
+        console.error(
+          "[Database] Failed to parse notificationPreference:",
+          e
+        );
         delete cleanUpdates.notificationPreference;
       }
     }
-    
+
     await db
       .update(userPreferences)
       .set(cleanUpdates)
@@ -204,9 +271,8 @@ export async function updateUserPreferences(
   }
 }
 
-/**
- * Save conversation message
- */
+// ==================== 对话 ====================
+
 export async function saveConversation(
   conversation: InsertConversation
 ): Promise<Conversation | null> {
@@ -214,25 +280,19 @@ export async function saveConversation(
   if (!db) return null;
 
   try {
-    const result = await db.insert(conversations).values(conversation);
-    const insertedId = Number(result[0].insertId);
+    // PostgreSQL: 使用 .returning() 替代 result[0].insertId
+    const result = await db
+      .insert(conversations)
+      .values(conversation)
+      .returning();
 
-    const inserted = await db
-      .select()
-      .from(conversations)
-      .where(eq(conversations.id, insertedId))
-      .limit(1);
-
-    return inserted[0] || null;
+    return result[0] || null;
   } catch (error) {
     console.error("[Database] Error saving conversation:", error);
     return null;
   }
 }
 
-/**
- * Get recent conversations for a user (optionally for a session)
- */
 export async function getRecentConversations(
   userId: number,
   limit: number = 20,
@@ -244,8 +304,14 @@ export async function getRecentConversations(
   try {
     const where =
       sessionId !== null
-        ? and(eq(conversations.userId, userId), eq(conversations.sessionId, sessionId))
-        : and(eq(conversations.userId, userId), isNull(conversations.sessionId));
+        ? and(
+            eq(conversations.userId, userId),
+            eq(conversations.sessionId, sessionId)
+          )
+        : and(
+            eq(conversations.userId, userId),
+            isNull(conversations.sessionId)
+          );
     const result = await db
       .select()
       .from(conversations)
@@ -260,9 +326,8 @@ export async function getRecentConversations(
   }
 }
 
-/**
- * Chat sessions
- */
+// ==================== 聊天会话 ====================
+
 export async function createChatSession(
   userId: number,
   title: string = "新会话"
@@ -270,17 +335,21 @@ export async function createChatSession(
   const db = await getDb();
   if (!db) return null;
   try {
-    const result = await db.insert(chatSessions).values({ userId, title });
-    const id = Number(result[0].insertId);
-    const rows = await db.select().from(chatSessions).where(eq(chatSessions.id, id)).limit(1);
-    return rows[0] || null;
+    // PostgreSQL: 使用 .returning() 替代 result[0].insertId
+    const result = await db
+      .insert(chatSessions)
+      .values({ userId, title })
+      .returning();
+    return result[0] || null;
   } catch (error) {
     console.error("[Database] Error creating chat session:", error);
     return null;
   }
 }
 
-export async function listChatSessions(userId: number): Promise<ChatSession[]> {
+export async function listChatSessions(
+  userId: number
+): Promise<ChatSession[]> {
   const db = await getDb();
   if (!db) return [];
   try {
@@ -306,8 +375,14 @@ export async function updateChatSession(
     await db
       .update(chatSessions)
       .set({ title, updatedAt: new Date() })
-      .where(and(eq(chatSessions.id, id), eq(chatSessions.userId, userId)));
-    const rows = await db.select().from(chatSessions).where(eq(chatSessions.id, id)).limit(1);
+      .where(
+        and(eq(chatSessions.id, id), eq(chatSessions.userId, userId))
+      );
+    const rows = await db
+      .select()
+      .from(chatSessions)
+      .where(eq(chatSessions.id, id))
+      .limit(1);
     return rows[0] || null;
   } catch (error) {
     console.error("[Database] Error updating chat session:", error);
@@ -315,13 +390,18 @@ export async function updateChatSession(
   }
 }
 
-export async function deleteChatSession(id: number, userId: number): Promise<boolean> {
+export async function deleteChatSession(
+  id: number,
+  userId: number
+): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
   try {
     await db
       .delete(chatSessions)
-      .where(and(eq(chatSessions.id, id), eq(chatSessions.userId, userId)));
+      .where(
+        and(eq(chatSessions.id, id), eq(chatSessions.userId, userId))
+      );
     return true;
   } catch (error) {
     console.error("[Database] Error deleting chat session:", error);

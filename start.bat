@@ -67,7 +67,7 @@ echo.
 echo [4/5] 执行数据库迁移...
 pnpm run db:push 2>nul
 if %errorlevel% neq 0 (
-    echo [警告] 数据库迁移失败，请确认 MySQL 已启动且 DATABASE_URL 配置正确
+    echo [警告] 数据库迁移失败，请确认 PostgreSQL 已启动且 DATABASE_URL 配置正确
     echo        如果是首次运行，请先创建数据库: CREATE DATABASE smart_agent;
 )
 

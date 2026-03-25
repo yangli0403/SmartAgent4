@@ -215,6 +215,11 @@ export class MCPManager implements IMCPManager {
           serverId: config.id,
           category: category,
           registeredAt: new Date(),
+          // 自进化闭环：初始化效用字段
+          utilityScore: 0.5,
+          successCount: 0,
+          failureCount: 0,
+          avgExecutionTimeMs: 0,
         };
         this.toolRegistry.register(registered);
       }

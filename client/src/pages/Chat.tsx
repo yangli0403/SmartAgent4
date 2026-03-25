@@ -54,7 +54,7 @@ export default function Chat() {
       utils.chat.listSessions.invalidate();
       if (data.persisted === false) {
         toast.warning(
-          "当前对话未保存到服务器，刷新后可能丢失。请确认 MySQL 已启动且 .env 中 DATABASE_URL 已配置。"
+          "当前对话未保存到服务器，刷新后可能丢失。请确认 PostgreSQL 已启动且 .env 中 DATABASE_URL 已配置。"
         );
       }
     },

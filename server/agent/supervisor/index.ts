@@ -30,6 +30,7 @@ export { replanNode, shouldContinueAfterReplan, REPLAN_SYSTEM_PROMPT } from "./r
 export { respondNode, RESPOND_SYSTEM_PROMPT } from "./respondNode";
 export { contextEnrichNode } from "./contextEnrichNode";
 export { memoryExtractionNode } from "./memoryExtractionNode";
+export { reflectionNode, type PromptPatch } from "./reflectionNode";
 
 // 图构建和运行
 export {

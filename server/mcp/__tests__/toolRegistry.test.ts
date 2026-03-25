@@ -1,7 +1,8 @@
 /**
- * ToolRegistry 单元测试
+ * ToolRegistry 单元测试（v2 — 含效用分数）
  *
- * 测试动态工具注册表的所有核心方法。
+ * 测试动态工具注册表的所有核心方法，
+ * 包括 Phase 4 新增的 updateUtility 和 getRankedTools。
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { ToolRegistry, type RegisteredTool, type ToolCategory } from "../toolRegistry";
@@ -14,6 +15,10 @@ function createTool(overrides: Partial<RegisteredTool> = {}): RegisteredTool {
     serverId: overrides.serverId || "server-1",
     category: overrides.category || "file_system",
     registeredAt: overrides.registeredAt || new Date(),
+    utilityScore: overrides.utilityScore ?? 0.5,
+    successCount: overrides.successCount ?? 0,
+    failureCount: overrides.failureCount ?? 0,
+    avgExecutionTimeMs: overrides.avgExecutionTimeMs ?? 0,
   };
 }
 
@@ -50,6 +55,16 @@ describe("ToolRegistry", () => {
       registry.register(tool);
       const registered = registry.get("test");
       expect(registered!.registeredAt.getTime()).toBeGreaterThan(oldDate.getTime());
+    });
+
+    it("注册时应初始化效用字段默认值", () => {
+      const tool = createTool({ name: "new_tool" });
+      registry.register(tool);
+      const registered = registry.get("new_tool")!;
+      expect(registered.utilityScore).toBe(0.5);
+      expect(registered.successCount).toBe(0);
+      expect(registered.failureCount).toBe(0);
+      expect(registered.avgExecutionTimeMs).toBe(0);
     });
   });
 
@@ -247,6 +262,135 @@ describe("ToolRegistry", () => {
       registry.clear();
       expect(registry.size()).toBe(0);
       expect(registry.getAll().length).toBe(0);
+    });
+  });
+
+  // ==================== updateUtility (Phase 4 新增) ====================
+
+  describe("updateUtility", () => {
+    it("成功调用应提升效用分数", () => {
+      registry.register(createTool({ name: "fast_tool" }));
+      registry.updateUtility({
+        toolName: "fast_tool",
+        success: true,
+        executionTimeMs: 100,
+      });
+      const tool = registry.get("fast_tool")!;
+      expect(tool.utilityScore).toBeGreaterThan(0.5);
+      expect(tool.successCount).toBe(1);
+      expect(tool.failureCount).toBe(0);
+      expect(tool.avgExecutionTimeMs).toBe(100);
+    });
+
+    it("失败调用应降低效用分数", () => {
+      registry.register(createTool({ name: "bad_tool" }));
+      registry.updateUtility({
+        toolName: "bad_tool",
+        success: false,
+        executionTimeMs: 5000,
+        errorMessage: "Connection timeout",
+      });
+      const tool = registry.get("bad_tool")!;
+      expect(tool.utilityScore).toBeLessThan(0.5);
+      expect(tool.successCount).toBe(0);
+      expect(tool.failureCount).toBe(1);
+    });
+
+    it("慢但成功的调用应适度提升效用分数", () => {
+      registry.register(createTool({ name: "slow_tool" }));
+      registry.updateUtility({
+        toolName: "slow_tool",
+        success: true,
+        executionTimeMs: 15000, // > 10s
+      });
+      const tool = registry.get("slow_tool")!;
+      // 0.3 * 0.7 + 0.7 * 0.5 = 0.21 + 0.35 = 0.56
+      expect(tool.utilityScore).toBeGreaterThan(0.5);
+      expect(tool.utilityScore).toBeLessThan(0.65);
+    });
+
+    it("多次调用应累积更新", () => {
+      registry.register(createTool({ name: "mixed_tool" }));
+      // 3次成功
+      for (let i = 0; i < 3; i++) {
+        registry.updateUtility({
+          toolName: "mixed_tool",
+          success: true,
+          executionTimeMs: 200,
+        });
+      }
+      // 1次失败
+      registry.updateUtility({
+        toolName: "mixed_tool",
+        success: false,
+        executionTimeMs: 1000,
+      });
+      const tool = registry.get("mixed_tool")!;
+      expect(tool.successCount).toBe(3);
+      expect(tool.failureCount).toBe(1);
+      // 效用分数应该仍然较高（3次成功 vs 1次失败）
+      expect(tool.utilityScore).toBeGreaterThan(0.3);
+    });
+
+    it("效用分数不应低于 0.05", () => {
+      registry.register(createTool({ name: "terrible_tool" }));
+      // 连续失败 20 次
+      for (let i = 0; i < 20; i++) {
+        registry.updateUtility({
+          toolName: "terrible_tool",
+          success: false,
+          executionTimeMs: 100,
+        });
+      }
+      const tool = registry.get("terrible_tool")!;
+      expect(tool.utilityScore).toBeGreaterThanOrEqual(0.05);
+    });
+
+    it("不存在的工具应静默跳过", () => {
+      expect(() =>
+        registry.updateUtility({
+          toolName: "nonexistent",
+          success: true,
+          executionTimeMs: 100,
+        })
+      ).not.toThrow();
+    });
+  });
+
+  // ==================== getRankedTools (Phase 4 新增) ====================
+
+  describe("getRankedTools", () => {
+    it("应按效用分数降序排列", () => {
+      registry.register(createTool({ name: "low", utilityScore: 0.2 }));
+      registry.register(createTool({ name: "high", utilityScore: 0.9 }));
+      registry.register(createTool({ name: "mid", utilityScore: 0.5 }));
+
+      const ranked = registry.getRankedTools();
+      expect(ranked.length).toBe(3);
+      expect(ranked[0].name).toBe("high");
+      expect(ranked[1].name).toBe("mid");
+      expect(ranked[2].name).toBe("low");
+    });
+
+    it("应支持按类别过滤", () => {
+      registry.register(
+        createTool({ name: "nav_high", category: "navigation", utilityScore: 0.9 })
+      );
+      registry.register(
+        createTool({ name: "nav_low", category: "navigation", utilityScore: 0.3 })
+      );
+      registry.register(
+        createTool({ name: "file_mid", category: "file_system", utilityScore: 0.6 })
+      );
+
+      const navRanked = registry.getRankedTools("navigation");
+      expect(navRanked.length).toBe(2);
+      expect(navRanked[0].name).toBe("nav_high");
+      expect(navRanked[1].name).toBe("nav_low");
+    });
+
+    it("空注册表应返回空数组", () => {
+      expect(registry.getRankedTools().length).toBe(0);
     });
   });
 });

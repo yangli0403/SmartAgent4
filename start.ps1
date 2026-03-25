@@ -37,7 +37,7 @@ try {
 }
 
 # ============================================================
-# 2. 检查 MySQL 连接
+# 2. 检查 PostgreSQL 连接
 # ============================================================
 
 Write-Host ""
@@ -82,7 +82,7 @@ try {
     pnpm run db:push 2>$null
     Write-Host "       数据库迁移完成" -ForegroundColor Green
 } catch {
-    Write-Host "[警告] 数据库迁移失败，请确认 MySQL 已启动" -ForegroundColor Yellow
+    Write-Host "[警告] 数据库迁移失败，请确认 PostgreSQL 已启动" -ForegroundColor Yellow
 }
 
 # ============================================================

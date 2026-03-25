@@ -1,14 +1,13 @@
 /**
- * Supervisor Graph — 增强版顶层编排图
+ * Supervisor Graph — 增强版顶层编排图（v2 — 自进化闭环）
  *
  * 使用 LangGraph StateGraph 构建 Supervisor 编排流程。
  *
- * SmartAgent3 增强流程：
- * START → contextEnrich → classify → [plan | execute] → execute → replan → [execute | respond] → memoryExtract → END
+ * SmartAgent4 增强流程：
+ * START → contextEnrich → classify → [plan | execute] → execute → replan → [execute | respond] → memoryExtract → reflection → END
  *
- * 新增节点：
- * - contextEnrich: 上下文增强（记忆检索+画像构建+动态 Prompt）
- * - memoryExtract: 记忆提取（从对话中异步提取新记忆）
+ * Phase 4 新增节点：
+ * - reflection: 反思节点（异步分析执行结果，更新工具效用分数，生成 Prompt 补丁）
  */
 
 import { StateGraph, START, END } from "@langchain/langgraph";
@@ -20,6 +19,7 @@ import { replanNode, shouldContinueAfterReplan } from "./replanNode";
 import { respondNode } from "./respondNode";
 import { contextEnrichNode } from "./contextEnrichNode";
 import { memoryExtractionNode } from "./memoryExtractionNode";
+import { reflectionNode } from "./reflectionNode";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
 
@@ -34,13 +34,14 @@ export function buildSupervisorGraph(agentRegistry: AgentRegistry) {
 
   const graph = new StateGraph(SupervisorState)
     // 添加节点
-    .addNode("contextEnrich", contextEnrichNode)  // SmartAgent3 新增
+    .addNode("contextEnrich", contextEnrichNode)
     .addNode("classify", classifyNode)
     .addNode("planStep", planNode)
     .addNode("execute", executeNode)
     .addNode("replan", replanNode)
     .addNode("respond", respondNode)
-    .addNode("memoryExtract", memoryExtractionNode)  // SmartAgent3 新增
+    .addNode("memoryExtract", memoryExtractionNode)
+    .addNode("reflection", reflectionNode)  // Phase 4 新增：自进化反思节点
 
     // 定义边
     // START → contextEnrich → classify
@@ -65,9 +66,10 @@ export function buildSupervisorGraph(agentRegistry: AgentRegistry) {
       respond: "respond",
     })
 
-    // respond → memoryExtract → END
+    // respond → memoryExtract → reflection → END
     .addEdge("respond", "memoryExtract")
-    .addEdge("memoryExtract", END);
+    .addEdge("memoryExtract", "reflection")
+    .addEdge("reflection", END);
 
   return graph.compile();
 }

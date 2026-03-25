@@ -173,6 +173,13 @@ export class SmartAgentApp {
   }
 
   /**
+   * 获取 ToolRegistry 实例（供自进化闭环使用）
+   */
+  getToolRegistry(): ToolRegistry {
+    return this.toolRegistry;
+  }
+
+  /**
    * 获取已注册的工具列表
    */
   getRegisteredTools() {
