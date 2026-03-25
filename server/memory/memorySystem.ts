@@ -44,6 +44,18 @@ export interface MemoryFormationInput {
   conversationHistory: Array<{ role: string; content: string }>;
 }
 
+/**
+ * 记忆提取配置选项（与 INTERFACE_DESIGN.md 对齐）
+ */
+export interface MemoryExtractionOptions {
+  /** 是否启用四层过滤机制，默认为 true */
+  enableFiltering?: boolean;
+  /** 动态去重阈值 (0.0 - 1.0)，默认为自动计算 */
+  deduplicationThreshold?: number;
+  /** 是否强制要求 LLM 输出时间锚定，默认为 true */
+  requireTimeAnchor?: boolean;
+}
+
 // ==================== 工作记忆（内存级） ====================
 
 class WorkingMemoryManager {
@@ -343,17 +355,27 @@ function dynamicDeduplication(newContent: string, newType: string, existingMemor
 /**
  * 从对话中异步提取并存储新记忆 — 四层过滤管道版
  */
-export async function extractMemoriesFromConversation(input: MemoryFormationInput): Promise<Memory[]> {
+export async function extractMemoriesFromConversation(
+  input: MemoryFormationInput,
+  options?: MemoryExtractionOptions
+): Promise<Memory[]> {
   const { userId, conversationHistory } = input;
+  const enableFiltering = options?.enableFiltering ?? true;
+  const customDeduplicationThreshold = options?.deduplicationThreshold;
+  // requireTimeAnchor 当前已内嵌在 MEMORY_EXTRACTION_PROMPT_V2 中，预留接口供后续扩展
+  // const requireTimeAnchor = options?.requireTimeAnchor ?? true;
+
   if (conversationHistory.length < 2) return [];
 
   const recentMessages = conversationHistory.slice(-10);
 
   // ====== Layer 1: 预过滤 ======
-  const preFilterResult = preFilterConversation(recentMessages);
-  if (!preFilterResult.pass) {
-    console.log(`[Memory] Layer1 预过滤拦截: ${preFilterResult.reason} (user ${userId})`);
-    return [];
+  if (enableFiltering) {
+    const preFilterResult = preFilterConversation(recentMessages);
+    if (!preFilterResult.pass) {
+      console.log(`[Memory] Layer1 预过滤拦截: ${preFilterResult.reason} (user ${userId})`);
+      return [];
+    }
   }
 
   try {
@@ -398,8 +420,8 @@ export async function extractMemoriesFromConversation(input: MemoryFormationInpu
     const existingMemories = await searchMemories({ userId, limit: 200, minImportance: 0 });
 
     // ====== Layer 4: 动态阈值去重 + 记忆融合 ======
-    const deduplicationThreshold = getDynamicDeduplicationThreshold(existingMemories.length);
-    console.log(`[Memory] Layer4 去重阈值: ${deduplicationThreshold} (已有 ${existingMemories.length} 条记忆)`);
+    const deduplicationThreshold = customDeduplicationThreshold ?? getDynamicDeduplicationThreshold(existingMemories.length);
+    console.log(`[Memory] Layer4 去重阈值: ${deduplicationThreshold}${customDeduplicationThreshold ? ' (自定义)' : ''} (已有 ${existingMemories.length} 条记忆)`);
 
     const savedMemories: Memory[] = [];
 

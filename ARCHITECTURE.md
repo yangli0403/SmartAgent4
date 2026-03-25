@@ -53,3 +53,8 @@ SmartAgent4 采用基于 Supervisor 的多 Agent 协作架构，结合了 LangGr
 - **背景**：需要在不增加用户感知延迟的前提下，实现系统的自我反思和进化。
 - **决策**：在对话回复返回给用户后，异步触发反思节点（Reflection Node），进行工具效用评估和 Prompt 补丁生成。
 - **理由**：异步处理可以完全解耦核心对话链路与后台优化逻辑，保证了系统的实时响应性能。
+
+### 4.4 工具效用分数的当前状态与后续规划
+- **当前状态**：工具效用分数的“写入端”已完备——`ToolRegistry.updateUtility()` 使用 EMA 算法实时更新分数，`reflectionNode` 将工具调用日志持久化到 `tool_utility_logs` 表。`getRankedTools()` 提供按效用分数排序的查询接口。
+- **已知限制**：效用分数的“读取端”尚未实现——`classifyNode` 和 `baseAgent` 未消费 `utilityScore`，Domain Agent 的工具集仍由 `availableTools` 静态数组决定。自进化闭环的“反馈回路”尚未完全闭合。
+- **后续规划**：在下一轮迭代中，计划在 `classifyNode` 中注入工具效用摘要，并在 `baseAgent.buildLangChainTools()` 中使用 `getRankedTools()` 动态调整工具优先级。

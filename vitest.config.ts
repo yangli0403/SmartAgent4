@@ -15,6 +15,7 @@ export default defineConfig({
         "server/mcp/fileOrganizerTools.ts",
         "server/mcp/fileOrganizerRegistration.ts",
         "server/mcp/toolRegistry.ts",
+        "server/agent/supervisor/reflectionNode.ts",
       ],
       exclude: ["**/*.test.ts", "**/index.ts"],
     },
