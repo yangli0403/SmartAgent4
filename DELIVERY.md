@@ -1,72 +1,98 @@
-# SmartAgent4 交付文档 (Delivery Document)
+# SmartAgent4 第二轮迭代交付文档
 
-## 1. 项目概述
+## 1. 迭代概述
 
-SmartAgent4 是在 SmartAgent3 基础上的重大迭代版本，成功融合了三个独立项目的核心能力，打造了一个更智能、更具情感、更实用的全能 Agent 架构。
+本轮迭代在 `windows-compat` 分支上进行，基于上传文档中的三个功能点需求，完成了从 Phase 4（实现）到 Phase 7（文档与交付）的全部工作。迭代前已完成 Phase 1-3（仓库分析、架构设计、接口设计），本轮从中断处继续。
 
-本次迭代的核心交付物包括三大功能模块：
-1. **SmartMem 记忆系统集成**：引入了混合检索、LLM 驱动的记忆巩固和基于艾宾浩斯曲线的动态遗忘机制。
-2. **Emotions-System 语音合成对接**：重写了情感客户端，支持解析复合情感标签并调用外部 Python 微服务生成 TTS 语音。
-3. **文件整理大师**：新增了强大的本地文件管理能力，支持目录分析、同名/重复文件检测，并内置了严格的安全确认机制。
+本次迭代的核心交付物包括三大功能模块的代码实现、60 个新增测试用例、更新的架构指南和完整的变更日志。
 
-## 2. 核心功能与使用指南
+## 2. 功能点交付详情
 
-### 2.1 记忆系统 (SmartMem)
-- **混合检索**：系统现在在检索记忆时，会同时使用 BM25 文本匹配和向量余弦相似度，通过加权融合（默认 `alpha=0.5`）提供更精准的召回结果。
-- **记忆巩固**：系统后台会定期（默认每 6 小时）扫描用户的碎片化情景记忆，当同类记忆达到阈值时，会自动调用 LLM 提炼为高阶的语义记忆或行为模式。
-- **动态遗忘**：系统每天会根据记忆的访问频率、重要性和类型，计算保留率。长期未访问的低价值记忆会逐渐衰减，直至被清理，从而保持记忆库的精简和高效。
+### 2.1 功能点 1：数据库从 MySQL 迁移至 PostgreSQL
 
-### 2.2 情感语音合成 (Emotions-System)
-- **复合标签支持**：LLM 现在可以输出如 `[emotion:happy|instruction:用欢快的语气]` 的复合标签。
-- **服务对接**：系统通过 `EmotionsSystemClient` 将这些标签和文本发送给外部的 Emotions-System 微服务（默认地址 `http://localhost:8000`），获取高质量的音频流。
-- **降级机制**：如果外部 TTS 服务不可用或超时，系统会自动降级，仅返回纯文本和情感标签，确保对话流程不被中断。
+本功能点将项目的数据库底层从 MySQL/TiDB 完整迁移至 PostgreSQL 16，为后续引入 Apache AGE 图数据库和 pgvector 向量存储奠定基础。迁移涉及 ORM Schema 定义、数据库驱动、Docker 容器配置、环境变量、启动脚本和用户文档等多个层面。
 
-### 2.3 文件整理大师
-- **目录分析 (`analyze_directory`)**：可以快速扫描下载目录，按文件类型、大小区间进行统计，并找出占用空间最大的文件和长期未使用的旧文件。
-- **重复检测 (`find_duplicates`)**：支持三种模式：
-  - `name`：仅查找同名文件。
-  - `hash`：基于文件大小和首尾 4KB 哈希（大文件快速模式）查找完全重复的文件。
-  - `both`：同时检测上述两种情况。
-- **安全清理 (`delete_files`)**：**核心安全特性**。Agent 在调用此工具前，必须先向用户展示文件列表并获取明确确认。删除操作默认将文件移入 `~/.Trash_SmartAgent` 模拟回收站，防止误删。
-- **批量归档 (`move_files`)**：支持将多个文件一键移动到指定目录，若目标目录存在同名文件，会自动添加时间戳后缀。
+迁移范围涵盖以下文件：`drizzle.config.ts`（dialect 切换）、`drizzle/schema.ts`（pg-core 重写，含 pgTable、pgEnum、serial、jsonb 等）、`server/db.ts`（postgres.js 驱动 + upsert/insert 语法适配）、`package.json`（mysql2 → postgres）、`docker-compose.yml`（PostgreSQL 16 容器）、`.env.example`（postgresql:// 连接字符串）、`start.bat`/`start.ps1`（提示文案）、`WINDOWS_SETUP_GUIDE.md`（全面更新）以及 `Chat.tsx`（前端提示文案）。
 
-## 3. 部署与运行说明
+### 2.2 功能点 2：记忆提取管道优化
 
-### 3.1 环境要求
-- Node.js 18+
-- 外部依赖：需要独立运行 Emotions-System Python 微服务（提供 TTS 能力）。
+本功能点对 `memorySystem.ts` 中的记忆提取流程进行了全面重构，引入四层过滤机制以提高记忆质量并减少 LLM Token 消耗。
 
-### 3.2 启动步骤
-1. 安装依赖：
-   ```bash
-   pnpm install
-   ```
-2. 数据库迁移（应用 SmartMem 的 Schema 扩展）：
-   ```bash
-   pnpm run db:push
-   ```
-3. 启动服务：
-   ```bash
-   pnpm run dev
-   ```
+第一层（预过滤）在送入 LLM 前拦截空消息、短内容（< 4 字符）和纯问候语对话。第二层（增强版 LLM 提取）使用结构化 Prompt，要求输出 kind/type/importance/confidence/versionGroup 等字段，并提供正反面示例指导 LLM 精准提取。第三层（置信度门控）对 LLM 输出进行后验证，过滤 importance < 0.3、confidence < 0.4 或 type 不合法的记忆。第四层（动态阈值去重）使用 Jaccard 字符相似度和子串包含检测，配合自适应阈值（记忆数 < 50 用 0.6，50-200 用 0.5，> 200 用 0.4）防止重复记忆入库。
 
-### 3.3 环境变量配置
-在 `.env` 文件中可以配置以下新增项：
-- `EMOTIONS_SYSTEM_URL`：Emotions-System 微服务的地址（默认 `http://localhost:8000`）。
-- `EMOTIONS_SYSTEM_ENABLED`：是否启用语音合成（默认 `true`）。
+此外，Phase 5 中补充了 `MemoryExtractionOptions` 接口，支持调用方自定义过滤开关、去重阈值等参数。
 
-## 4. 测试覆盖率
+### 2.3 功能点 3：自进化闭环落地
 
-本次迭代新增了 36 个单元测试，覆盖了所有新增的核心逻辑：
-- `hybridSearch.test.ts`：验证了 BM25、向量相似度及混合加权算法的正确性。
-- `forgettingService.test.ts`：验证了艾宾浩斯遗忘曲线的数学模型。
-- `emotionsClient.test.ts`：验证了复合标签的正则解析和客户端的降级容错机制。
-- `fileOrganizerTools.test.ts`：验证了 MCP 工具的 Schema 定义和注册机制。
+本功能点实现了系统的自我反思和进化能力，包含三个核心组件。
 
-所有测试均已通过。
+**反思节点**（`reflectionNode.ts`）作为 Supervisor 图中 `memoryExtractionNode` 之后的新节点，以异步 fire-and-forget 方式运行，不阻塞用户响应。它分析本轮执行中的工具调用记录，更新工具效用分数，将日志持久化到 `tool_utility_logs` 表，并使用 LLM 分析执行质量生成 Prompt 补丁建议。
 
-## 5. 未来演进建议
+**工具效用分数**通过扩展 `ToolRegistry`（v2）实现。`RegisteredTool` 接口新增了 `utilityScore`、`successCount`、`failureCount`、`avgExecutionTimeMs` 四个字段。`updateUtility()` 方法使用指数移动平均（EMA, alpha=0.3）算法更新效用分数，成功调用得 1.0 分、慢但成功得 0.7 分、失败得 0.0 分，分数下限为 0.05。`getRankedTools()` 提供按效用分数排序的查询接口。
 
-1. **向量数据库迁移**：目前向量检索是在内存中计算余弦相似度，随着记忆量增加，建议引入 pgvector 或专门的向量数据库（如 Milvus、Qdrant）。
-2. **文件整理可视化**：可以在前端增加专门的文件整理面板，将 `analyze_directory` 的结果用饼图或柱状图展示，提升用户体验。
-3. **TTS 音色克隆**：结合用户的记忆系统，未来可以让 Emotions-System 根据用户的偏好自动选择或克隆特定的音色。
+**Prompt 版本控制**通过新增的 `prompt_versions` 表实现，记录每次 Prompt 变更的补丁内容、推理过程、变更前后快照，支持回滚到任意历史版本。
+
+## 3. 测试覆盖
+
+本轮新增 4 个测试文件，共 60 个测试用例，全部通过。
+
+| 测试文件 | 用例数 | 覆盖范围 |
+|---------|--------|---------|
+| `memoryPipeline.test.ts` | 30 | 四层过滤管道：预过滤、置信度门控、Jaccard 相似度、动态去重 |
+| `schemaPostgres.test.ts` | 13 | PostgreSQL Schema 结构验证：枚举、表结构、类型导出 |
+| `reflectionNode.test.ts` | 11 | 反思节点：跳过逻辑、触发逻辑、状态不变性、输入构建 |
+| `memoryExtractionOptions.test.ts` | 6 | MemoryExtractionOptions 接口兼容性 |
+
+全量测试结果：282 个测试中 271 通过，11 个失败为上一轮遗留问题（emotionsClient 5 个 + contextManager 6 个），与本轮功能无关。
+
+## 4. 文件变更清单
+
+本轮迭代共涉及以下文件的新增或修改：
+
+| 类别 | 文件 | 操作 |
+|------|------|------|
+| Schema | `drizzle.config.ts` | 修改 |
+| Schema | `drizzle/schema.ts` | 修改 |
+| 数据库 | `server/db.ts` | 修改 |
+| 配置 | `docker-compose.yml` | 修改 |
+| 配置 | `.env.example` | 修改 |
+| 配置 | `package.json` | 修改 |
+| 记忆系统 | `server/memory/memorySystem.ts` | 修改 |
+| 自进化 | `server/agent/supervisor/reflectionNode.ts` | 新增 |
+| 自进化 | `server/mcp/toolRegistry.ts` | 修改 |
+| 自进化 | `server/agent/supervisor/supervisorGraph.ts` | 修改 |
+| 自进化 | `server/agent/supervisor/index.ts` | 修改 |
+| 自进化 | `server/agent/smartAgentApp.ts` | 修改 |
+| 自进化 | `server/mcp/mcpManager.ts` | 修改 |
+| 测试 | `server/memory/__tests__/memoryPipeline.test.ts` | 新增 |
+| 测试 | `server/memory/__tests__/schemaPostgres.test.ts` | 新增 |
+| 测试 | `server/memory/__tests__/memoryExtractionOptions.test.ts` | 新增 |
+| 测试 | `server/agent/supervisor/__tests__/reflectionNode.test.ts` | 新增 |
+| 测试 | `vitest.config.ts` | 修改 |
+| 文档 | `CLAUDE.md` | 修改 |
+| 文档 | `ARCHITECTURE.md` | 修改 |
+| 文档 | `REQUIREMENTS_REFLECTION.md` | 新增 |
+| 文档 | `CHANGELOG.md` | 修改 |
+| 文档 | `DELIVERY.md` | 修改 |
+| 文档 | `WINDOWS_SETUP_GUIDE.md` | 修改 |
+| 脚本 | `start.bat` | 修改 |
+| 脚本 | `start.ps1` | 修改 |
+| 前端 | `client/src/pages/Chat.tsx` | 修改 |
+
+## 5. 已知限制与后续规划
+
+本轮迭代在自进化闭环的"写入端"已完备，但"读取端"尚未实现。具体而言，`classifyNode` 和 `baseAgent` 尚未消费工具效用分数，Domain Agent 的工具集仍由静态数组决定。此外，代码和文档中仍有少量 MySQL 残留引用（`routers.ts` 错误提示、`index.ts` 注释等）需要在后续迭代中清理。
+
+建议在下一轮迭代中优先完成以下工作：在 `classifyNode` 中注入工具效用摘要，在 `baseAgent.buildLangChainTools()` 中使用 `getRankedTools()` 动态调整工具优先级，以及引入 pgvector 替代内存向量检索。
+
+## 6. Git 提交历史
+
+本轮迭代在 `windows-compat` 分支上的提交记录：
+
+| 提交 | 阶段 | 说明 |
+|------|------|------|
+| Phase 4 | 实现 | 三个功能点的完整代码实现 |
+| Phase 5 | 需求反思 | 需求对比验证 + 3 项修复 |
+| Phase 6 | 自动化测试 | 新增 4 个测试文件 60 个用例 |
+| Phase 6b | AI 架构指南 | 更新 CLAUDE.md |
+| Phase 7 | 文档与交付 | 更新 CHANGELOG.md + DELIVERY.md |
