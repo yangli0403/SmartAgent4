@@ -16,6 +16,7 @@ export default defineConfig({
         "server/mcp/fileOrganizerRegistration.ts",
         "server/mcp/toolRegistry.ts",
         "server/agent/supervisor/reflectionNode.ts",
+        "server/airi-bridge/**/*.ts",
       ],
       exclude: ["**/*.test.ts", "**/index.ts"],
     },
