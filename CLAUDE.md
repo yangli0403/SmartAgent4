@@ -173,15 +173,63 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 
 所有 Domain Agent 继承 `BaseAgent`，通过 `AgentRegistry` 注册到 `executeNode`。
 
-## 10. API 层
+## 10. AIRI Bridge 模块（第三轮迭代新增）
+
+AIRI Bridge 将 SmartAgent4 作为 AIRI Plugin Module 连接到 AIRI Server Runtime，实现 Live2D/VRM 形象的情感化渲染。
+
+### 10.1 核心组件
+
+| 文件 | 职责 |
+|------|------|
+| `server/airi-bridge/airiBridgeService.ts` | 核心 Bridge 服务：WebSocket 连接、事件收发、生命周期管理 |
+| `server/airi-bridge/emotionMapper.ts` | 情感映射器：SmartAgent4 EmotionType → AIRI 表情/动作指令 |
+| `server/airi-bridge/audioConverter.ts` | 音频格式转换器：WAV 头部解析、时长估算 |
+| `server/airi-bridge/config.ts` | 配置管理（环境变量 > 配置文件 > 默认值） |
+| `server/airi-bridge/types.ts` | 类型定义 |
+| `config/airi-bridge.json` | 默认配置（含情感映射表） |
+
+### 10.2 数据流
+
+```
+SmartAgent4 回复
+  → routers.ts chat.sendMessage 截获
+  → AiriBridgeService.sendResponse()
+  → EmotionMapper.mapSegmentsToAiriMessage() / mapTextToAiriMessage()
+  → WebSocket 发送 output:gen-ai:chat:message 事件
+  → AIRI Server Runtime → AIRI 前端 Live2D/VRM 渲染
+
+AIRI 前端输入
+  → WebSocket 接收 input:text / input:text:voice 事件
+  → AiriBridgeService.onInput() 回调
+  → 转发到 SmartAgent4 chat()
+```
+
+### 10.3 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `AIRI_SERVER_URL` | `ws://localhost:6121/ws` | AIRI Server WebSocket 地址 |
+| `AIRI_TOKEN` | (empty) | 认证 Token |
+| `AIRI_AUTO_CONNECT` | `true` | 是否自动连接 |
+| `AIRI_ENABLE_EMOTION` | `true` | 是否启用情感渲染 |
+| `AIRI_ENABLE_TTS` | `true` | 是否启用语音合成 |
+| `AIRI_DEFAULT_CHARACTER` | `xiaozhi` | 默认角色 ID |
+
+### 10.4 设计原则
+
+- **渐进增强**：AIRI Bridge 失败不影响 SmartAgent4 核心功能
+- **最小侵入**：仅修改 2 个现有文件（supervisorGraph.ts + routers.ts）
+- **可配置**：所有行为通过配置文件/环境变量控制
+
+## 11. API 层
 
 - **协议**：tRPC（类型安全的 RPC）
 - **路由定义**：`server/routers.ts`
-- **主要端点**：`chat.*`、`memory.*`、`preferences.*`、`character.*`、`emotions.*`、`agent.*`
+- **主要端点**：`chat.*`、`memory.*`、`preferences.*`、`character.*`、`emotions.*`、`airi.*`、`agent.*`
 - **额外 REST 路由**：`server/routers/chatRouterEnhanced.ts`、`server/routers/sequentialThinkingRouter.ts`
 - **服务入口**：`server/_core/index.ts`
 
-## 11. 测试
+## 12. 测试
 
 - **框架**：Vitest 2
 - **配置**：`vitest.config.ts`
@@ -190,7 +238,7 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 - **当前状态**：282 个测试，271 通过，11 失败（遗留问题：emotionsClient 5 + contextManager 6）
 - **本轮新增**：60 个测试全部通过（memoryPipeline 30 + schemaPostgres 13 + memoryExtractionOptions 6 + reflectionNode 11）
 
-## 12. 开发约定
+## 13. 开发约定
 
 1. **新增 Domain Agent**：继承 `BaseAgent` → 在 `toolRegistry.ts` 注册 → 在 `AgentRegistry` 中添加映射
 2. **新增人格**：在 `server/personality/characters/` 中添加 JSON 配置，兼容 ElizaOS Characterfile 格式
@@ -199,7 +247,7 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 5. **数据库迁移**：`pnpm db:push`（Drizzle ORM → PostgreSQL）
 6. **工具效用更新**：通过 `ToolRegistry.updateUtility()` 使用 EMA 算法更新，由 `reflectionNode` 自动触发
 
-## 13. 关键设计决策
+## 14. 关键设计决策
 
 | 决策 | 理由 |
 |------|------|
@@ -210,7 +258,7 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 | 记忆系统内嵌而非独立微服务 | 减少网络开销，记忆数据与 Agent 上下文高度耦合 |
 | LLM 双轨策略 | Manus API 为主，Volcengine ARK 为回退 |
 
-## 14. 待办事项
+## 15. 待办事项
 
 - [ ] 闭合自进化反馈回路：classifyNode 消费工具效用分数，baseAgent 使用 getRankedTools() 动态调整工具优先级
 - [ ] 引入 pgvector 向量存储，替代内存向量检索
@@ -219,6 +267,9 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 - [ ] Emotions-Express 微服务部署与端到端集成测试
 - [ ] 修复遗留测试失败（emotionsClient mock + contextManager 位置服务 mock）
 - [ ] 清理代码和文档中残留的 MySQL 引用（routers.ts、index.ts 注释等）
+- [ ] AIRI Bridge 流式输出（边说边动）实现
+- [ ] AIRI Bridge 与 AIRI Server SDK 官方包对接
+- [ ] AIRI 前端输入事件 → SmartAgent4 chat() 双向集成端到端测试
 
 ---
 
