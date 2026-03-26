@@ -47,6 +47,20 @@ import { getPersonalityEngine } from "./personality/personalityEngine";
 import { getEmotionsClient } from "./emotions/emotionsClient";
 import { getUserProfileSnapshot } from "./memory/memorySystem";
 import type { User } from "../drizzle/schema";
+import { AiriBridgeService } from "./airi-bridge";
+
+// ==================== 初始化 AIRI Bridge（可选）====================
+let airiBridge: AiriBridgeService | null = null;
+try {
+  airiBridge = new AiriBridgeService();
+  airiBridge.initialize().then(() => {
+    console.log("[Router] AIRI Bridge initialized");
+  }).catch((err: Error) => {
+    console.warn(`[Router] AIRI Bridge init failed (non-blocking): ${err.message}`);
+  });
+} catch (err) {
+  console.warn(`[Router] AIRI Bridge creation failed (non-blocking): ${(err as Error).message}`);
+}
 
 // 测试模式辅助函数：确保有用户可用
 const SKIP_AUTH = process.env.SKIP_AUTH === "true" || process.env.VITE_SKIP_OAUTH === "true";
@@ -198,6 +212,16 @@ export const appRouter = router({
             "[Chat] 对话未写入数据库（请检查 MySQL 是否已启动且 DATABASE_URL 已配置）"
           );
         }
+        // ===== AIRI Bridge 集成：将回复转发到 AIRI =====
+        if (airiBridge && airiBridge.getStatus().status === "ready") {
+          try {
+            await airiBridge.sendResponse(responseText, undefined, String(sessionId ?? userId));
+            console.log("[Chat] Response forwarded to AIRI Bridge");
+          } catch (bridgeErr) {
+            console.warn(`[Chat] AIRI Bridge forward failed: ${(bridgeErr as Error).message}`);
+          }
+        }
+
         return {
           response: responseText,
           memoriesUsed,
@@ -412,6 +436,72 @@ export const appRouter = router({
         proactiveService: prefs?.proactiveService || "enabled",
       };
     }),
+  }),
+
+  // ==================== SmartAgent4 新增：AIRI Bridge 路由 ====================
+
+  airi: router({
+    /** 查询 AIRI Bridge 连接状态 */
+    status: publicProcedure.query(() => {
+      if (!airiBridge) {
+        return { status: "disconnected" as const, serverUrl: "", messageCount: 0, activeCharacterId: "xiaozhi" };
+      }
+      return airiBridge.getStatus();
+    }),
+
+    /** 手动连接 AIRI Server */
+    connect: protectedProcedure
+      .input(z.object({
+        serverUrl: z.string().url().optional(),
+        token: z.string().optional(),
+      }).optional())
+      .mutation(async ({ input }) => {
+        if (!airiBridge) {
+          airiBridge = new AiriBridgeService(input ? {
+            airiServerUrl: input.serverUrl,
+            airiToken: input.token,
+          } : undefined);
+        }
+        try {
+          await airiBridge.connect();
+          return { success: true, status: airiBridge.getStatus().status };
+        } catch (err) {
+          return { success: false, status: airiBridge.getStatus().status, error: (err as Error).message };
+        }
+      }),
+
+    /** 断开 AIRI 连接 */
+    disconnect: protectedProcedure.mutation(() => {
+      if (airiBridge) {
+        airiBridge.disconnect();
+      }
+      return { success: true };
+    }),
+
+    /** 获取 Bridge 配置 */
+    getConfig: protectedProcedure.query(() => {
+      if (!airiBridge) {
+        return null;
+      }
+      return airiBridge.getConfig();
+    }),
+
+    /** 更新 Bridge 配置 */
+    updateConfig: protectedProcedure
+      .input(z.object({
+        airiServerUrl: z.string().url().optional(),
+        autoConnect: z.boolean().optional(),
+        enableEmotionRendering: z.boolean().optional(),
+        enableTTS: z.boolean().optional(),
+        defaultCharacterId: z.string().optional(),
+      }))
+      .mutation(({ input }) => {
+        if (!airiBridge) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "AIRI Bridge 未初始化" });
+        }
+        const config = airiBridge.updateConfig(input);
+        return { success: true, config };
+      }),
   }),
 
   // ==================== SmartAgent3 新增路由 ====================

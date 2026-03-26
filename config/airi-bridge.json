@@ -1,0 +1,47 @@
+{
+  "airiServerUrl": "ws://localhost:6121/ws",
+  "airiToken": "",
+  "autoConnect": true,
+  "autoReconnect": true,
+  "maxReconnectAttempts": -1,
+  "enableEmotionRendering": true,
+  "enableTTS": true,
+  "defaultCharacterId": "xiaozhi",
+  "emotionMapping": {
+    "neutral": {
+      "expressions": [{ "expression": "default", "intensity": 1.0 }],
+      "motions": [{ "motion": "idle" }],
+      "mouthFormOffset": 0.0
+    },
+    "happy": {
+      "expressions": [{ "expression": "smile", "intensity": 0.8 }],
+      "motions": [{ "motion": "nod" }],
+      "mouthFormOffset": 0.2
+    },
+    "sad": {
+      "expressions": [{ "expression": "sad", "intensity": 0.7 }],
+      "motions": [{ "motion": "slow_sway" }],
+      "mouthFormOffset": -0.1
+    },
+    "angry": {
+      "expressions": [{ "expression": "angry", "intensity": 0.8 }],
+      "motions": [{ "motion": "shake" }],
+      "mouthFormOffset": 0.1
+    },
+    "surprised": {
+      "expressions": [{ "expression": "surprised", "intensity": 0.9 }],
+      "motions": [{ "motion": "jump_back" }],
+      "mouthFormOffset": 0.3
+    },
+    "fearful": {
+      "expressions": [{ "expression": "fear", "intensity": 0.6 }],
+      "motions": [{ "motion": "tremble" }],
+      "mouthFormOffset": -0.2
+    },
+    "disgusted": {
+      "expressions": [{ "expression": "disgust", "intensity": 0.7 }],
+      "motions": [{ "motion": "turn_away" }],
+      "mouthFormOffset": -0.1
+    }
+  }
+}

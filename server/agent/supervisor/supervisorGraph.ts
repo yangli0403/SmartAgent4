@@ -22,6 +22,7 @@ import { memoryExtractionNode } from "./memoryExtractionNode";
 import { reflectionNode } from "./reflectionNode";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
+import type { MultimodalSegment } from "../../emotions/types";
 
 /**
  * 构建 Supervisor 图
@@ -114,6 +115,13 @@ export interface SupervisorOutput {
   totalDurationMs: number;
   /** SmartAgent3 新增：使用的人格 ID */
   characterId: string;
+  /**
+   * SmartAgent4 新增：多模态输出片段
+   *
+   * 当 AIRI Bridge 启用且 Emotions-System 可用时填充。
+   * 包含文本、音频、情感和动作指令。
+   */
+  multimodalSegments?: MultimodalSegment[];
 }
 
 /**
