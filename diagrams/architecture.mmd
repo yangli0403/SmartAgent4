@@ -1,67 +1,97 @@
 graph TD
-    subgraph Client["前端客户端 (React + Vite)"]
-        UI[用户界面]
-        Chat[对话组件]
-        Cockpit[驾驶舱组件]
+    subgraph Client["客户端层 (React + Vite + tRPC)"]
+        UI["用户界面"]
+        Chat["对话组件"]
+        Cockpit["驾驶舱组件"]
     end
 
-    subgraph API_Layer["API 层 (tRPC)"]
-        Router[主路由 routers.ts]
-        ChatRouter[对话路由]
-        MemoryRouter[记忆路由]
+    subgraph API["API 层"]
+        TRPC["tRPC Router"]
+        EXPRESS["Express REST API"]
+        WS["WebSocket Server"]
     end
 
-    subgraph Agent_Engine["Agent 引擎 (Supervisor 架构)"]
-        Context[上下文增强 ContextEnrichNode]
-        Classify[任务分类 ClassifyNode]
-        Plan[任务规划 PlanNode]
-        Execute[任务执行 ExecuteNode]
-        Respond[回复生成 RespondNode]
-        Extract[记忆提取 MemoryExtractionNode]
-        Reflect[反思与进化 ReflectionNode]
+    subgraph Supervisor["Supervisor 编排层 (LangGraph StateGraph)"]
+        CTX["contextEnrichNode<br/>上下文增强"]
+        CLASSIFY["classifyNode<br/>任务分类 (动态 Prompt)"]
+        PLAN["planNode<br/>动态规划 (动态 Prompt)"]
+        EXEC["parallelExecuteNode<br/>并行执行引擎"]
+        REPLAN["replanNode<br/>重规划"]
+        RESPOND["respondNode<br/>响应生成"]
+        MEMORY_EXT["memoryExtractionNode<br/>记忆提取"]
+        REFLECT["reflectionNode<br/>自进化反思"]
     end
 
-    subgraph Personality_System["人格系统"]
-        Engine[人格引擎 PersonalityEngine]
-        PromptBuilder[Prompt 构建器]
+    subgraph AgentDiscovery["Agent Card 动态发现层 (新增)"]
+        CARD_REG["AgentCardRegistry<br/>动态注册表"]
+        CARDS[("agent-cards/<br/>JSON 配置目录")]
+        PROMPT_ASM["DynamicPromptAssembler<br/>动态 Prompt 组装器"]
     end
 
-    subgraph Memory_System["记忆系统"]
-        WorkingMem[工作记忆 WorkingMemory]
-        HybridSearch[混合检索 HybridSearch]
-        Consolidation[记忆巩固 ConsolidationService]
+    subgraph DomainAgents["Domain Agent 层 (BaseAgent 继承体系)"]
+        FA["FileAgent"]
+        NA["NavigationAgent"]
+        MA["MultimediaAgent"]
+        GA["GeneralAgent"]
+        CUSTOM["自定义 Agent<br/>(热插拔接入)"]
     end
 
-    subgraph Tool_System["工具系统 (MCP)"]
-        MCPManager[MCP 管理器]
-        ToolRegistry[工具注册表 ToolRegistry]
-        Tools[具体工具集]
+    subgraph Infrastructure["基础设施层"]
+        MCP["MCPManager<br/>MCP Server 连接管理"]
+        TOOL_REG["ToolRegistry v2<br/>工具注册表 + 效用分数"]
+        MEMORY["MemorySystem<br/>三层记忆架构"]
+        PERSONALITY["PersonalityEngine<br/>人格引擎"]
+        EMOTIONS["EmotionsClient<br/>情感语音合成"]
     end
 
-    subgraph Data_Layer["数据访问层 (Drizzle ORM)"]
-        DB[数据库操作 db.ts]
-        Schema[数据模型 schema.ts]
+    subgraph Storage["数据持久层"]
+        PG[("PostgreSQL 15<br/>Drizzle ORM")]
     end
 
-    subgraph Database["底层数据库"]
-        PostgreSQL[(PostgreSQL 15)]
-    end
+    UI --> Chat
+    Chat -->|"tRPC 调用"| TRPC
+    TRPC --> CTX
+    EXPRESS --> CTX
+    WS --> CTX
 
-    %% 数据流与依赖关系
-    UI -->|用户输入| Chat
-    Chat -->|tRPC 调用| ChatRouter
-    ChatRouter -->|启动对话| Agent_Engine
+    CTX -->|"记忆检索 + 画像"| MEMORY
+    CTX -->|"System Prompt"| PERSONALITY
+    CTX --> CLASSIFY
 
-    Context -->|获取画像| Memory_System
-    Context -->|获取 Prompt| Personality_System
-    Classify -->|查询效用分数| Tool_System
-    Execute -->|调用工具| Tool_System
-    Extract -->|异步写入| Memory_System
-    Reflect -->|更新效用分数| Tool_System
-    Reflect -->|更新 Prompt 补丁| Personality_System
+    CLASSIFY -->|"查询 Agent 能力描述"| CARD_REG
+    CLASSIFY -->|"simple"| EXEC
+    CLASSIFY -->|"moderate/complex"| PLAN
 
-    Memory_System -->|CRUD| Data_Layer
-    Personality_System -->|读取配置| Data_Layer
-    Agent_Engine -->|保存对话| Data_Layer
+    PLAN -->|"动态 Prompt 注入"| PROMPT_ASM
+    PROMPT_ASM -->|"遍历 Agent Cards"| CARD_REG
+    CARD_REG -->|"启动时扫描加载"| CARDS
+    PLAN --> EXEC
 
-    Data_Layer -->|SQL 查询| PostgreSQL
+    EXEC -->|"并行分发<br/>(Promise.all 无依赖步骤)"| FA
+    EXEC -->|"并行分发"| NA
+    EXEC -->|"并行分发"| MA
+    EXEC -->|"并行分发"| GA
+    EXEC -->|"并行分发"| CUSTOM
+
+    FA -.->|"delegate() 委托协议"| CARD_REG
+    NA -.->|"delegate() 委托协议"| CARD_REG
+
+    EXEC --> REPLAN
+    REPLAN -->|"继续"| EXEC
+    REPLAN -->|"完成"| RESPOND
+    RESPOND --> MEMORY_EXT
+    RESPOND --> EMOTIONS
+    MEMORY_EXT --> REFLECT
+
+    FA --> MCP
+    NA --> MCP
+    MA --> MCP
+    GA --> MCP
+    CUSTOM --> MCP
+    MCP --> TOOL_REG
+
+    REFLECT -->|"更新效用分数"| TOOL_REG
+    REFLECT -->|"Prompt 补丁"| PG
+    MEMORY --> PG
+    PERSONALITY --> PG
+    TOOL_REG -.->|"效用分数持久化"| PG
