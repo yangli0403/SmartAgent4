@@ -4,6 +4,83 @@
 
 ---
 
+## [1.2.0] - 2026-03-27
+
+### 第三轮迭代：多智能体协同架构（windows-compat 分支）
+
+本轮迭代基于《SmartAgent4 架构分析与演进报告 V2》，实现从单体编排走向多智能体协同的架构演进。
+
+#### 功能点 1：Agent Card 动态发现
+
+**新增**
+- `server/agent/discovery/types.ts` — AgentCard、IAgentCardRegistry、IDynamicPromptAssembler、DelegateRequest/Result 等类型定义
+- `server/agent/discovery/agentCardRegistry.ts` — Agent Card 注册表（Zod 校验、加载、注册、注销、按能力/领域查询、单例工厂）
+- `server/agent/discovery/dynamicPromptAssembler.ts` — 动态 Prompt 组装器（buildClassifyPrompt、buildPlanPrompt、getAgentCapabilitySummary）
+- `server/agent/discovery/index.ts` — discovery 模块导出
+- `server/agent/agent-cards/fileAgent.json` — 文件管理专员 Agent Card（15 工具）
+- `server/agent/agent-cards/navigationAgent.json` — 导航出行专员 Agent Card（19 工具）
+- `server/agent/agent-cards/multimediaAgent.json` — 多媒体娱乐专员 Agent Card（8 工具）
+- `server/agent/agent-cards/generalAgent.json` — 通用对话专员 Agent Card（0 工具）
+
+#### 功能点 2：并行执行引擎
+
+**新增**
+- `server/agent/discovery/parallelExecuteEngine.ts` — DAG 并行执行引擎
+  - `analyzeDependencies()` — Kahn 拓扑排序，生成按层级排列的执行批次
+  - `createParallelExecuteNode()` — LangGraph 兼容节点函数，替代串行 executeNode
+  - `resolveInputMapping()` — 步骤间数据引用解析（step_N.field 格式）
+  - 循环依赖检测与降级处理
+
+#### 功能点 3：委托协议
+
+**修改**
+- `server/agent/domains/baseAgent.ts` — 新增 `setAgentCardRegistry()` 和 `delegate()` 委托方法（深度限制 3 层）
+
+#### 核心改造
+
+**修改**
+- `server/agent/supervisor/state.ts` — `PlanStep.targetAgent` 从联合字面量改为 `string`
+- `server/agent/supervisor/classifyNode.ts` — 注入 DynamicPromptAssembler，动态生成分类 Prompt
+- `server/agent/supervisor/planNode.ts` — 注入 DynamicPromptAssembler，动态 Agent 列表 + 并行执行提示
+- `server/agent/supervisor/supervisorGraph.ts` — 双模式支持（IAgentCardRegistry 使用并行引擎，AgentRegistry 使用串行兼容）
+- `server/agent/smartAgentApp.ts` — 初始化流程改造：加载 Agent Card → 创建实例 → 绑定注册表 → 注入委托能力
+- `server/agent/supervisor/index.ts` — 更新导出，新增 discovery 模块
+
+#### Phase 5：需求反思
+
+**修复**
+- `server/agent/agent-cards/navigationAgent.json` — 工具名与真实实现对齐（19 个工具完全匹配）
+- `server/agent/agent-cards/fileAgent.json` — 补充缺失的文件整理工具和能力标签
+- `server/agent/discovery/agentCardRegistry.ts` — `findByCapability` 从模糊 includes 改为精确匹配
+
+**新增**
+- `REQUIREMENTS_REFLECTION_V2.md` — 第三轮迭代需求反思报告
+
+#### Phase 6：自动化测试
+
+**新增**
+- `server/agent/discovery/__tests__/agentCardRegistry.test.ts` — 36 个测试用例
+- `server/agent/discovery/__tests__/dynamicPromptAssembler.test.ts` — 15 个测试用例
+- `server/agent/discovery/__tests__/parallelExecuteEngine.test.ts` — 18 个测试用例
+- `server/agent/discovery/__tests__/parallelExecuteEngine.integration.test.ts` — 8 个测试用例
+
+**测试结果**
+- discovery 模块：77 个测试，77 全部通过
+- discovery 模块覆盖率：语句 97.68%，分支 90.4%，函数 100%
+
+#### Phase 6b：AI 架构指南
+
+**修改**
+- `CLAUDE.md` — 全面更新为第三轮迭代版本，新增多智能体协同架构章节
+
+#### Phase 7：文档与交付
+
+**修改**
+- `README.md` — 全面更新，新增多智能体协同架构章节
+- `CHANGELOG.md` — 新增第三轮迭代变更记录
+
+---
+
 ## [1.1.0] - 2026-03-25
 
 ### 第二轮迭代：Phase 4-7（windows-compat 分支）
