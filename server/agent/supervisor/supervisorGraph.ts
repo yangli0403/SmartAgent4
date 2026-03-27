@@ -1,13 +1,15 @@
 /**
- * Supervisor Graph — 增强版顶层编排图（v2 — 自进化闭环）
+ * Supervisor Graph — 增强版顶层编排图（v3 — 多智能体协同）
  *
  * 使用 LangGraph StateGraph 构建 Supervisor 编排流程。
  *
- * SmartAgent4 增强流程：
+ * SmartAgent4 V2 增强流程：
  * START → contextEnrich → classify → [plan | execute] → execute → replan → [execute | respond] → memoryExtract → reflection → END
  *
- * Phase 4 新增节点：
- * - reflection: 反思节点（异步分析执行结果，更新工具效用分数，生成 Prompt 补丁）
+ * V2 改造：
+ * - execute 节点从串行 createExecuteNode 替换为并行 createParallelExecuteNode
+ * - 图构建参数从旧 AgentRegistry (Record<string, Agent>) 改为 IAgentCardRegistry
+ * - 保留旧 AgentRegistry 兼容路径，当 IAgentCardRegistry 不可用时降级
  */
 
 import { StateGraph, START, END } from "@langchain/langgraph";
@@ -23,15 +25,35 @@ import { reflectionNode } from "./reflectionNode";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
 import type { MultimodalSegment } from "../../emotions/types";
+import type { IAgentCardRegistry } from "../discovery/types";
+import { createParallelExecuteNode } from "../discovery/parallelExecuteEngine";
 
 /**
- * 构建 Supervisor 图
+ * 构建 Supervisor 图（V2 — 支持并行执行）
  *
- * @param agentRegistry - Domain Agent 注册表
+ * @param agentSource - Agent 来源，支持新旧两种注册表
  * @returns 编译后的 LangGraph 图
  */
-export function buildSupervisorGraph(agentRegistry: AgentRegistry) {
-  const executeNode = createExecuteNode(agentRegistry);
+export function buildSupervisorGraph(
+  agentSource: IAgentCardRegistry | AgentRegistry
+) {
+  // 判断是新注册表还是旧注册表
+  const isNewRegistry =
+    agentSource &&
+    typeof (agentSource as IAgentCardRegistry).getAgent === "function" &&
+    typeof (agentSource as IAgentCardRegistry).getAllEnabled === "function";
+
+  let executeNode: (state: any) => Promise<any>;
+
+  if (isNewRegistry) {
+    // 使用并行执行引擎
+    console.log("[SupervisorGraph] Using ParallelExecuteEngine with AgentCardRegistry");
+    executeNode = createParallelExecuteNode(agentSource as IAgentCardRegistry);
+  } else {
+    // 降级使用旧串行执行节点
+    console.log("[SupervisorGraph] Falling back to serial ExecuteNode with legacy AgentRegistry");
+    executeNode = createExecuteNode(agentSource as AgentRegistry);
+  }
 
   const graph = new StateGraph(SupervisorState)
     // 添加节点
@@ -42,7 +64,7 @@ export function buildSupervisorGraph(agentRegistry: AgentRegistry) {
     .addNode("replan", replanNode)
     .addNode("respond", respondNode)
     .addNode("memoryExtract", memoryExtractionNode)
-    .addNode("reflection", reflectionNode)  // Phase 4 新增：自进化反思节点
+    .addNode("reflection", reflectionNode)
 
     // 定义边
     // START → contextEnrich → classify
@@ -129,13 +151,15 @@ export interface SupervisorOutput {
  *
  * 将外部输入转换为 LangGraph 状态，执行图，提取输出。
  *
+ * V2 增强：支持 IAgentCardRegistry 和旧 AgentRegistry 两种注册表。
+ *
  * @param input - 外部输入
- * @param agentRegistry - Domain Agent 注册表
+ * @param agentSource - Agent 来源（新注册表或旧注册表）
  * @returns Supervisor 输出
  */
 export async function runSupervisor(
   input: SupervisorInput,
-  agentRegistry: AgentRegistry
+  agentSource: IAgentCardRegistry | AgentRegistry
 ): Promise<SupervisorOutput> {
   const startTime = Date.now();
 
@@ -184,7 +208,7 @@ export async function runSupervisor(
   };
 
   // 3. 构建图并执行
-  const compiledGraph = buildSupervisorGraph(agentRegistry);
+  const compiledGraph = buildSupervisorGraph(agentSource);
 
   const characterId = input.context.characterId || "xiaozhi";
 

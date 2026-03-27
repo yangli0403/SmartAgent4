@@ -3,9 +3,14 @@
  *
  * 将所有模块组装在一起：
  * 1. 初始化 Tool Registry 和 MCP Manager
- * 2. 创建 Domain Agent 实例
- * 3. 构建 Supervisor Graph
+ * 2. 加载 Agent Card 配置并创建 Domain Agent 实例
+ * 3. 构建 Supervisor Graph（使用并行执行引擎）
  * 4. 提供统一的 chat 接口
+ *
+ * V2 增强：
+ * - 使用 AgentCardRegistry 替代硬编码 agentRegistry
+ * - 自动扫描 agent-cards/ 目录加载 Agent Card
+ * - 为每个 Agent 注入 AgentCardRegistry 引用（支持委托协议）
  */
 
 import { ToolRegistry } from "../mcp/toolRegistry";
@@ -22,14 +27,21 @@ import {
   runSupervisor,
   type SupervisorInput,
   type SupervisorOutput,
-  type AgentRegistry,
 } from "./supervisor";
+import {
+  getAgentCardRegistry,
+  type IAgentCardRegistry,
+} from "./discovery";
+import type { BaseAgent } from "./domains/baseAgent";
+import * as path from "path";
 
 // ==================== 应用实例 ====================
 
 export interface SmartAgentAppConfig {
   /** 自定义 MCP 配置路径 */
   mcpConfigPath?: string;
+  /** 自定义 Agent Card 目录路径 */
+  agentCardsDir?: string;
 }
 
 /**
@@ -41,14 +53,14 @@ export class SmartAgentApp {
   private toolRegistry: ToolRegistry;
   private mcpManager: MCPManager;
   private contextManager: ContextManager;
-  private agentRegistry: AgentRegistry;
+  private agentCardRegistry: IAgentCardRegistry;
   private initialized: boolean = false;
 
   constructor() {
     this.toolRegistry = new ToolRegistry();
     this.mcpManager = new MCPManager(this.toolRegistry);
     this.contextManager = new ContextManager();
-    this.agentRegistry = {};
+    this.agentCardRegistry = getAgentCardRegistry();
   }
 
   /**
@@ -57,7 +69,8 @@ export class SmartAgentApp {
    * 1. 加载 MCP 配置
    * 2. 初始化 MCP Manager（连接所有 MCP Server）
    * 3. 注入 MCP 工具调用能力到 Context Manager
-   * 4. 创建 Domain Agent 实例
+   * 4. 加载 Agent Card 配置
+   * 5. 创建 Domain Agent 实例并绑定到注册表
    */
   async initialize(config?: SmartAgentAppConfig): Promise<void> {
     if (this.initialized) {
@@ -87,13 +100,25 @@ export class SmartAgentApp {
       this.mcpManager.callTool.bind(this.mcpManager)
     );
 
-    // 4. 创建 Domain Agent 实例
-    this.agentRegistry = {
-      fileAgent: new FileAgent(this.mcpManager),
-      navigationAgent: new NavigationAgent(this.mcpManager),
-      multimediaAgent: new MultimediaAgent(this.mcpManager),
-      generalAgent: new GeneralAgent(this.mcpManager),
-    };
+    // 4. 加载 Agent Card 配置
+    const agentCardsDir =
+      config?.agentCardsDir ||
+      path.resolve(__dirname, "agent-cards");
+
+    try {
+      await this.agentCardRegistry.loadFromDirectory(agentCardsDir);
+      console.log(
+        `[SmartAgentApp] Agent Cards loaded: ${this.agentCardRegistry.size()} agents`
+      );
+    } catch (error) {
+      console.warn(
+        `[SmartAgentApp] Failed to load Agent Cards from ${agentCardsDir}: ${(error as Error).message}`
+      );
+      console.warn("[SmartAgentApp] Falling back to hardcoded agent registration");
+    }
+
+    // 5. 创建 Domain Agent 实例并绑定
+    this.createAndBindAgents();
 
     this.initialized = true;
 
@@ -103,8 +128,75 @@ export class SmartAgentApp {
     );
     console.log(`  - Tools registered: ${this.toolRegistry.size()}`);
     console.log(
-      `  - Domain Agents: ${Object.keys(this.agentRegistry).join(", ")}`
+      `  - Agent Cards: ${this.agentCardRegistry.size()} loaded`
     );
+    console.log(
+      `  - Agents: ${this.agentCardRegistry.getAllIds().join(", ")}`
+    );
+  }
+
+  /**
+   * 创建 Domain Agent 实例并绑定到注册表
+   *
+   * 根据 Agent Card 配置创建对应的 Agent 实例。
+   * 如果注册表为空（Agent Card 加载失败），则使用硬编码方式注册。
+   */
+  private createAndBindAgents(): void {
+    // Agent 实例映射表：Agent ID → Agent 实例
+    const agentInstances: Record<string, BaseAgent> = {
+      fileAgent: new FileAgent(this.mcpManager),
+      navigationAgent: new NavigationAgent(this.mcpManager),
+      multimediaAgent: new MultimediaAgent(this.mcpManager),
+      generalAgent: new GeneralAgent(this.mcpManager),
+    };
+
+    // 绑定到注册表
+    for (const [agentId, agent] of Object.entries(agentInstances)) {
+      if (this.agentCardRegistry.has(agentId)) {
+        // Agent Card 已加载，绑定实例
+        this.agentCardRegistry.bindAgent(agentId, agent);
+      } else {
+        // Agent Card 未加载，手动注册（降级路径）
+        console.warn(
+          `[SmartAgentApp] Agent Card not found for ${agentId}, registering with defaults`
+        );
+        this.agentCardRegistry.register(
+          {
+            id: agentId,
+            name: agent.name,
+            description: agent.description,
+            capabilities: [],
+            tools: agent.availableTools,
+            domain: this.inferDomain(agentId),
+            implementationClass: agentId,
+            llmConfig: { temperature: 0.7, maxTokens: 4096, maxIterations: 8 },
+            systemPromptTemplate: "",
+            enabled: true,
+            priority: 50,
+          },
+          agent
+        );
+      }
+
+      // 注入 AgentCardRegistry 引用，启用委托能力
+      agent.setAgentCardRegistry(this.agentCardRegistry);
+    }
+
+    console.log(
+      `[SmartAgentApp] ${Object.keys(agentInstances).length} agents created and bound`
+    );
+  }
+
+  /**
+   * 根据 Agent ID 推断领域（降级用）
+   */
+  private inferDomain(
+    agentId: string
+  ): "file_system" | "navigation" | "multimedia" | "general" | "custom" {
+    if (agentId.includes("file")) return "file_system";
+    if (agentId.includes("navigation")) return "navigation";
+    if (agentId.includes("multimedia")) return "multimedia";
+    return "general";
   }
 
   /**
@@ -150,8 +242,8 @@ export class SmartAgentApp {
       },
     };
 
-    // 运行 Supervisor
-    return runSupervisor(input, this.agentRegistry);
+    // 运行 Supervisor（使用 AgentCardRegistry）
+    return runSupervisor(input, this.agentCardRegistry);
   }
 
   /**
@@ -180,6 +272,13 @@ export class SmartAgentApp {
   }
 
   /**
+   * 获取 AgentCardRegistry 实例
+   */
+  getAgentCardRegistry(): IAgentCardRegistry {
+    return this.agentCardRegistry;
+  }
+
+  /**
    * 获取已注册的工具列表
    */
   getRegisteredTools() {
@@ -193,12 +292,19 @@ export class SmartAgentApp {
 
   /**
    * 获取 Domain Agent 信息
+   *
+   * V2 增强：从 AgentCardRegistry 获取，包含 Agent Card 完整信息。
    */
   getAgentInfo() {
-    return Object.entries(this.agentRegistry).map(([key, agent]) => ({
-      name: agent.name,
-      description: agent.description,
-      availableTools: agent.availableTools,
+    return this.agentCardRegistry.getAllEnabled().map((card) => ({
+      id: card.id,
+      name: card.name,
+      description: card.description,
+      domain: card.domain,
+      capabilities: card.capabilities,
+      tools: card.tools,
+      priority: card.priority,
+      enabled: card.enabled,
     }));
   }
 
@@ -208,6 +314,7 @@ export class SmartAgentApp {
   async shutdown(): Promise<void> {
     console.log("[SmartAgentApp] Shutting down...");
     await this.mcpManager.shutdown();
+    this.agentCardRegistry.clear();
     this.initialized = false;
     console.log("[SmartAgentApp] Shutdown complete");
   }

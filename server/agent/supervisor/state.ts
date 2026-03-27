@@ -41,8 +41,8 @@ export interface PlanStep {
   id: number;
   /** 步骤描述（自然语言） */
   description: string;
-  /** 执行该步骤的目标 Agent */
-  targetAgent: "fileAgent" | "navigationAgent" | "multimediaAgent" | "generalAgent";
+  /** 执行该步骤的目标 Agent（动态字符串，运行时通过 AgentCardRegistry 验证） */
+  targetAgent: string;
   /** 预期使用的工具名称列表 */
   expectedTools: string[];
   /** 依赖的前置步骤 ID 列表 */

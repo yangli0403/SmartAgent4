@@ -1,16 +1,27 @@
 /**
  * Plan Node — 动态规划节点
  *
- * 使用 LLM 将复杂任务分解为有序的执行步骤，
- * 替代原有的硬编码规则规划。
+ * 使用 LLM 将复杂任务分解为有序的执行步骤。
+ *
+ * V2 增强：
+ * - System Prompt 从硬编码改为运行时通过 DynamicPromptAssembler 动态生成
+ * - validAgents 从硬编码数组改为 AgentCardRegistry.getAllIds() 动态获取
+ * - 新增并行执行提示：无依赖步骤的 dependsOn 设为空数组
  */
 
 import type { SupervisorStateType, PlanStep, ExecutionPlan } from "./state";
 import { callLLMStructured } from "../../llm/langchainAdapter";
 import { HumanMessage } from "@langchain/core/messages";
+import {
+  getAgentCardRegistry,
+  DynamicPromptAssembler,
+} from "../discovery";
 
 /**
- * planNode 的 LLM 系统提示词
+ * planNode 的 LLM 系统提示词（静态降级版本）
+ *
+ * 当 AgentCardRegistry 为空时使用此降级 Prompt。
+ * 正常情况下使用 DynamicPromptAssembler 动态生成。
  */
 export const PLAN_SYSTEM_PROMPT = `你是一个任务规划专家。根据用户需求和任务分类，将任务分解为有序的执行步骤。
 
@@ -20,20 +31,6 @@ export const PLAN_SYSTEM_PROMPT = `你是一个任务规划专家。根据用户
 - multimediaAgent: 音乐搜索、音乐播放、歌单管理、每日推荐、登录状态管理
 - generalAgent: 通用对话、知识问答、信息分析、结果汇总（不使用工具）
 
-navigationAgent 可用工具：
-maps_search_around, maps_search_keyword, maps_direction_driving, maps_direction_walking,
-maps_direction_transit, maps_direction_bicycling, maps_geocode, maps_regeocode,
-maps_weather, maps_ip_location, maps_distance, maps_poi_detail, maps_search_detail,
-maps_static_map, maps_coordinate_convert, maps_navigation, maps_riding_taxi
-
-multimediaAgent 可用工具：
-search, get_song_detail, get_song_url, get_unblocked_url,
-get_lyric, get_playlist, get_album, get_artist
-
-fileAgent 可用工具：
-search_files, get_file_info, open_file, list_directory, create_folder,
-create_file, copy_files, launch_app, browser_control, list_running_apps, close_app
-
 规划原则：
 1. 每个步骤应该是一个原子操作，由单个 Agent 完成
 2. 步骤之间可以有依赖关系（dependsOn 指定前置步骤 ID）
@@ -41,6 +38,7 @@ create_file, copy_files, launch_app, browser_control, list_running_apps, close_a
 4. 导航类任务如果需要用户位置，第一步应该是获取位置（如果上下文中没有）
 5. 步骤数量应该精简，避免不必要的步骤
 6. 最后一步通常是 generalAgent 汇总所有结果
+7. 没有数据依赖的步骤应该将 dependsOn 设为空数组，以便并行执行
 
 请以 JSON 格式输出（不要包含其他文字）：
 {
@@ -57,6 +55,28 @@ create_file, copy_files, launch_app, browser_control, list_running_apps, close_a
   ],
   "estimatedComplexity": "simple|moderate|complex"
 }`;
+
+/**
+ * 获取规划 Prompt
+ *
+ * 优先使用 DynamicPromptAssembler 动态生成，
+ * 注册表为空时降级使用静态 Prompt。
+ */
+function getPlanPrompt(): string {
+  const registry = getAgentCardRegistry();
+
+  if (registry.size() === 0) {
+    console.log("[PlanNode] Registry empty, using static prompt");
+    return PLAN_SYSTEM_PROMPT;
+  }
+
+  const assembler = new DynamicPromptAssembler(registry);
+  const dynamicPrompt = assembler.buildPlanPrompt();
+  console.log(
+    `[PlanNode] Using dynamic prompt with ${registry.size()} agents`
+  );
+  return dynamicPrompt;
+}
 
 /**
  * 动态规划节点
@@ -103,10 +123,12 @@ export async function planNode(
     planRequest += `\n- 平台: ${state.context.platform}`;
   }
 
-  // 3. 调用 LLM 生成计划
+  // 3. 获取动态 Prompt 并调用 LLM
+  const planPrompt = getPlanPrompt();
+
   try {
     const plan = await callLLMStructured<ExecutionPlan>(
-      PLAN_SYSTEM_PROMPT,
+      planPrompt,
       planRequest,
       { temperature: 0.3 }
     );
@@ -116,20 +138,19 @@ export async function planNode(
       throw new Error("Plan has no steps");
     }
 
-    // 确保每个步骤都有有效的 targetAgent
-    const validAgents = [
-      "fileAgent",
-      "navigationAgent",
-      "multimediaAgent",
-      "generalAgent",
-    ];
+    // 动态获取有效 Agent 列表
+    const registry = getAgentCardRegistry();
+    const validAgents =
+      registry.size() > 0
+        ? registry.getAllIds()
+        : ["fileAgent", "navigationAgent", "multimediaAgent", "generalAgent"];
 
     for (const step of plan.steps) {
       if (!validAgents.includes(step.targetAgent)) {
         console.warn(
           `[PlanNode] Invalid targetAgent "${step.targetAgent}" in step ${step.id}, defaulting to generalAgent`
         );
-        step.targetAgent = "generalAgent" as any;
+        step.targetAgent = "generalAgent";
       }
 
       // 确保数组字段存在
@@ -165,7 +186,7 @@ export async function planNode(
       {
         id: 1,
         description: userText,
-        targetAgent: fallbackAgent as any,
+        targetAgent: fallbackAgent,
         expectedTools: [],
         dependsOn: [],
         inputMapping: {},

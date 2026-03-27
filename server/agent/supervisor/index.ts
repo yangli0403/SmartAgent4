@@ -2,6 +2,8 @@
  * Supervisor 模块入口
  *
  * 导出 Supervisor 图构建器、运行函数和所有相关类型。
+ *
+ * V2 增强：保留旧 AgentRegistry 导出以兼容现有代码。
  */
 
 // 状态和类型

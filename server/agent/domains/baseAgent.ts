@@ -3,6 +3,10 @@
  *
  * 封装 LangGraph ReACT 循环的通用逻辑，
  * 所有 Domain Agent 继承此基类，只需定义配置和系统提示词。
+ *
+ * V2 增强：
+ * - 注入 AgentCardRegistry 引用，支持运行时 Agent 发现
+ * - 新增 delegate() 方法，支持 Agent 间委托协议
  */
 
 import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
@@ -26,6 +30,16 @@ import type {
   AgentStructuredData,
 } from "./types";
 import type { ToolCallRecord } from "../supervisor/state";
+import type {
+  IAgentCardRegistry,
+  DelegateRequest,
+  DelegateResult,
+} from "../discovery/types";
+
+// ==================== 常量 ====================
+
+/** 最大委托深度，防止循环委托导致无限递归 */
+const MAX_DELEGATE_DEPTH = 3;
 
 // ==================== Agent 内部状态 ====================
 
@@ -46,9 +60,27 @@ export abstract class BaseAgent implements DomainAgentInterface {
   protected config: DomainAgentConfig;
   protected mcpManager: MCPManager;
 
+  /**
+   * Agent Card 注册表引用
+   *
+   * 用于 delegate() 方法中查找其他 Agent 的能力。
+   * 可选注入，未注入时 delegate() 将返回失败。
+   */
+  protected agentCardRegistry?: IAgentCardRegistry;
+
   constructor(config: DomainAgentConfig, mcpManager: MCPManager) {
     this.config = config;
     this.mcpManager = mcpManager;
+  }
+
+  /**
+   * 设置 Agent Card 注册表引用
+   *
+   * 在 SmartAgentApp 初始化时调用，注入注册表实例。
+   * 采用 setter 注入而非构造函数注入，避免修改所有子类构造函数。
+   */
+  setAgentCardRegistry(registry: IAgentCardRegistry): void {
+    this.agentCardRegistry = registry;
   }
 
   /**
@@ -63,6 +95,130 @@ export abstract class BaseAgent implements DomainAgentInterface {
     _output: string
   ): AgentStructuredData | undefined {
     return undefined;
+  }
+
+  /**
+   * 委托子任务给其他 Agent
+   *
+   * 当前 Agent 在执行过程中发现能力不足时，可以通过此方法
+   * 查找具有所需能力的其他 Agent 并委托子任务。
+   *
+   * @param request - 委托请求
+   * @returns 委托结果
+   */
+  async delegate(request: DelegateRequest): Promise<DelegateResult> {
+    const depth = request.depth || 0;
+
+    // 1. 检查委托深度
+    if (depth >= MAX_DELEGATE_DEPTH) {
+      console.warn(
+        `[${this.name}] Delegate depth exceeded (${depth}/${MAX_DELEGATE_DEPTH})`
+      );
+      return {
+        success: false,
+        output: "",
+        delegatedTo: "",
+        error: `Max delegation depth exceeded (${MAX_DELEGATE_DEPTH})`,
+      };
+    }
+
+    // 2. 检查注册表是否可用
+    if (!this.agentCardRegistry) {
+      console.warn(
+        `[${this.name}] AgentCardRegistry not available for delegation`
+      );
+      return {
+        success: false,
+        output: "",
+        delegatedTo: "",
+        error: "AgentCardRegistry not available",
+      };
+    }
+
+    // 3. 按能力标签查找匹配的 Agent
+    const candidates = this.agentCardRegistry.findByCapability(
+      request.capability
+    );
+
+    // 排除自己，避免自我委托
+    const filtered = candidates.filter((card) => card.id !== this.name);
+
+    if (filtered.length === 0) {
+      console.warn(
+        `[${this.name}] No agent found for capability: ${request.capability}`
+      );
+      return {
+        success: false,
+        output: "",
+        delegatedTo: "",
+        error: `No agent found for capability: ${request.capability}`,
+      };
+    }
+
+    // 4. 选择优先级最高的 Agent
+    const targetCard = filtered[0];
+    const targetAgent = this.agentCardRegistry.getAgent(targetCard.id);
+
+    if (!targetAgent) {
+      console.warn(
+        `[${this.name}] Agent instance not found for: ${targetCard.id}`
+      );
+      return {
+        success: false,
+        output: "",
+        delegatedTo: targetCard.id,
+        error: `Agent instance not bound for: ${targetCard.id}`,
+      };
+    }
+
+    // 5. 构建委托执行输入
+    console.log(
+      `[${this.name}] Delegating to ${targetCard.id}: "${request.task}" (depth: ${depth})`
+    );
+
+    const delegateInput: AgentExecutionInput = {
+      step: {
+        id: 0,
+        description: request.task,
+        targetAgent: targetCard.id,
+        expectedTools: targetCard.tools,
+        dependsOn: [],
+        inputMapping: {},
+      },
+      userMessage: request.task,
+      resolvedInputs: request.context || {},
+      conversationHistory: [],
+      context: undefined,
+    };
+
+    // 6. 执行委托
+    try {
+      const output = await targetAgent.execute(delegateInput);
+
+      console.log(
+        `[${this.name}] Delegation to ${targetCard.id} completed: ${output.success}`
+      );
+
+      return {
+        success: output.success,
+        output: output.output,
+        delegatedTo: targetCard.id,
+        error: output.error,
+        toolCalls: output.toolCalls,
+      };
+    } catch (error) {
+      console.error(
+        `[${this.name}] Delegation to ${targetCard.id} failed:`,
+        (error as Error).message
+      );
+
+      return {
+        success: false,
+        output: "",
+        delegatedTo: targetCard.id,
+        error: (error as Error).message,
+      };
+    }
   }
 
   /**
