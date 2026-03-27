@@ -1,0 +1,26 @@
+{
+  "id": "generalAgent",
+  "name": "通用对话专员",
+  "description": "通用对话、知识问答、信息分析、结果汇总（不使用工具）",
+  "capabilities": [
+    "general_conversation",
+    "knowledge_qa",
+    "information_analysis",
+    "result_summarization"
+  ],
+  "tools": [],
+  "domain": "general",
+  "implementationClass": "GeneralAgent",
+  "llmConfig": {
+    "temperature": 0.7,
+    "maxTokens": 4096,
+    "maxIterations": 1
+  },
+  "systemPromptTemplate": "你是一个通用对话专员。你的职责是进行知识问答、闲聊和结果汇总。",
+  "enabled": true,
+  "priority": 30,
+  "metadata": {
+    "version": "1.0.0",
+    "author": "SmartAgent4"
+  }
+}

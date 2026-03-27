@@ -1,0 +1,39 @@
+{
+  "id": "fileAgent",
+  "name": "文件管理专员",
+  "description": "文件搜索、文件信息查询、打开文件、目录操作、创建文件/文件夹、复制文件、启动应用、浏览器控制",
+  "capabilities": [
+    "file_search",
+    "file_management",
+    "directory_operations",
+    "app_launch",
+    "browser_control"
+  ],
+  "tools": [
+    "search_files",
+    "get_file_info",
+    "open_file",
+    "list_directory",
+    "create_folder",
+    "create_file",
+    "copy_files",
+    "launch_app",
+    "browser_control",
+    "list_running_apps",
+    "close_app"
+  ],
+  "domain": "file_system",
+  "implementationClass": "FileAgent",
+  "llmConfig": {
+    "temperature": 0.3,
+    "maxTokens": 4096,
+    "maxIterations": 5
+  },
+  "systemPromptTemplate": "你是一个文件系统管理专员。你的职责是帮助用户进行文件和应用操作。",
+  "enabled": true,
+  "priority": 50,
+  "metadata": {
+    "version": "1.0.0",
+    "author": "SmartAgent4"
+  }
+}

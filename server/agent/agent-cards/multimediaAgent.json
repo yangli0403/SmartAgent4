@@ -1,0 +1,35 @@
+{
+  "id": "multimediaAgent",
+  "name": "多媒体娱乐专员",
+  "description": "音乐搜索、音乐播放、歌单管理、每日推荐、登录状态管理",
+  "capabilities": [
+    "music_search",
+    "music_playback",
+    "playlist_management",
+    "daily_recommendation"
+  ],
+  "tools": [
+    "search",
+    "get_song_detail",
+    "get_song_url",
+    "get_unblocked_url",
+    "get_lyric",
+    "get_playlist",
+    "get_album",
+    "get_artist"
+  ],
+  "domain": "multimedia",
+  "implementationClass": "MultimediaAgent",
+  "llmConfig": {
+    "temperature": 0.5,
+    "maxTokens": 4096,
+    "maxIterations": 5
+  },
+  "systemPromptTemplate": "你是一个多媒体娱乐专员。你的职责是帮助用户搜索和播放音乐。",
+  "enabled": true,
+  "priority": 50,
+  "metadata": {
+    "version": "1.0.0",
+    "author": "SmartAgent4"
+  }
+}

@@ -1,0 +1,108 @@
+classDiagram
+    class AgentCard {
+        +string id
+        +string name
+        +string description
+        +string[] capabilities
+        +string[] tools
+        +AgentDomain domain
+        +string implementationClass
+        +AgentLLMConfig llmConfig
+        +string systemPromptTemplate
+        +boolean enabled
+        +number priority
+        +Record metadata
+    }
+
+    class IAgentCardRegistry {
+        <<interface>>
+        +loadFromDirectory(dir: string) Promise~void~
+        +register(card: AgentCard, agent?: DomainAgentInterface) void
+        +unregister(agentId: string) void
+        +getCard(agentId: string) AgentCard
+        +getAgent(agentId: string) DomainAgentInterface
+        +bindAgent(agentId: string, agent: DomainAgentInterface) void
+        +has(agentId: string) boolean
+        +getAllEnabled() AgentCard[]
+        +findByCapability(cap: string) AgentCard[]
+        +findByDomain(domain: AgentDomain) AgentCard[]
+    }
+
+    class AgentCardRegistry {
+        -Map~string, RegistryEntry~ entries
+        +loadFromDirectory(dir: string) Promise~void~
+        +register(card: AgentCard, agent?: DomainAgentInterface) void
+        +getCard(agentId: string) AgentCard
+        +getAgent(agentId: string) DomainAgentInterface
+        +findByCapability(cap: string) AgentCard[]
+    }
+
+    class IDynamicPromptAssembler {
+        <<interface>>
+        +buildClassifyPrompt() string
+        +buildPlanPrompt() string
+        +getAgentCapabilitySummary() string
+    }
+
+    class DynamicPromptAssembler {
+        -IAgentCardRegistry registry
+        +buildClassifyPrompt() string
+        +buildPlanPrompt() string
+        +getAgentCapabilitySummary() string
+        -formatAgentSection(card: AgentCard) string
+    }
+
+    class DomainAgentInterface {
+        <<interface>>
+        +string name
+        +string description
+        +string[] availableTools
+        +execute(input: AgentExecutionInput) Promise~AgentExecutionOutput~
+        +getSystemPrompt(context?) string
+    }
+
+    class IDelegatableAgent {
+        <<interface>>
+        +delegate(request: DelegateRequest) Promise~DelegateResult~
+    }
+
+    class BaseAgent {
+        <<abstract>>
+        #DomainAgentConfig config
+        #MCPManager mcpManager
+        #IAgentCardRegistry agentCardRegistry
+        +execute(input: AgentExecutionInput) Promise~AgentExecutionOutput~
+        +delegate(request: DelegateRequest) Promise~DelegateResult~
+        #getSystemPrompt(context?) string
+    }
+
+    class DelegateRequest {
+        +string capability
+        +string task
+        +Record context
+        +number depth
+    }
+
+    class DelegateResult {
+        +boolean success
+        +string output
+        +string delegatedTo
+        +string error
+    }
+
+    class ExecutionBatch {
+        +number batchIndex
+        +number[] stepIds
+    }
+
+    IAgentCardRegistry <|.. AgentCardRegistry
+    IDynamicPromptAssembler <|.. DynamicPromptAssembler
+    DomainAgentInterface <|.. BaseAgent
+    IDelegatableAgent <|.. BaseAgent
+    DomainAgentInterface <|-- IDelegatableAgent
+
+    AgentCardRegistry --> AgentCard : manages
+    DynamicPromptAssembler --> IAgentCardRegistry : reads
+    BaseAgent --> IAgentCardRegistry : delegates via
+    BaseAgent --> DelegateRequest : creates
+    BaseAgent --> DelegateResult : receives

@@ -1,0 +1,46 @@
+{
+  "id": "navigationAgent",
+  "name": "导航出行专员",
+  "description": "POI搜索、周边搜索、路径规划（驾车/步行/骑行/公交）、地理编码、天气查询、IP定位、导航",
+  "capabilities": [
+    "poi_search",
+    "route_planning",
+    "geocoding",
+    "weather_query",
+    "ip_location",
+    "navigation"
+  ],
+  "tools": [
+    "maps_search_around",
+    "maps_search_keyword",
+    "maps_direction_driving",
+    "maps_direction_walking",
+    "maps_direction_transit",
+    "maps_direction_bicycling",
+    "maps_geocode",
+    "maps_regeocode",
+    "maps_weather",
+    "maps_ip_location",
+    "maps_distance",
+    "maps_poi_detail",
+    "maps_search_detail",
+    "maps_static_map",
+    "maps_coordinate_convert",
+    "maps_navigation",
+    "maps_riding_taxi"
+  ],
+  "domain": "navigation",
+  "implementationClass": "NavigationAgent",
+  "llmConfig": {
+    "temperature": 0.3,
+    "maxTokens": 4096,
+    "maxIterations": 5
+  },
+  "systemPromptTemplate": "你是一个导航出行专员。你的职责是帮助用户进行位置搜索、路径规划和导航。",
+  "enabled": true,
+  "priority": 50,
+  "metadata": {
+    "version": "1.0.0",
+    "author": "SmartAgent4"
+  }
+}
