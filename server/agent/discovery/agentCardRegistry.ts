@@ -192,7 +192,7 @@ export class AgentCardRegistry implements IAgentCardRegistry {
     const lowerCap = capability.toLowerCase();
     return this.getAllEnabled()
       .filter((card) =>
-        card.capabilities.some((c) => c.toLowerCase().includes(lowerCap))
+        card.capabilities.some((c) => c.toLowerCase() === lowerCap)
       )
       .sort((a, b) => b.priority - a.priority);
   }

@@ -1,13 +1,15 @@
 {
   "id": "fileAgent",
   "name": "文件管理专员",
-  "description": "文件搜索、文件信息查询、打开文件、目录操作、创建文件/文件夹、复制文件、启动应用、浏览器控制",
+  "description": "文件搜索、文件信息查询、打开文件、目录操作、创建文件/文件夹、复制文件、启动应用、浏览器控制、文件整理（目录分析、重复文件检测、安全删除、批量移动）",
   "capabilities": [
     "file_search",
     "file_management",
     "directory_operations",
     "app_launch",
-    "browser_control"
+    "browser_control",
+    "file_organization",
+    "duplicate_detection"
   ],
   "tools": [
     "search_files",
@@ -20,20 +22,25 @@
     "launch_app",
     "browser_control",
     "list_running_apps",
-    "close_app"
+    "close_app",
+    "analyze_directory",
+    "find_duplicates",
+    "delete_files",
+    "move_files"
   ],
   "domain": "file_system",
   "implementationClass": "FileAgent",
   "llmConfig": {
     "temperature": 0.3,
-    "maxTokens": 4096,
-    "maxIterations": 5
+    "maxTokens": 3000,
+    "maxIterations": 8
   },
-  "systemPromptTemplate": "你是一个文件系统管理专员。你的职责是帮助用户进行文件和应用操作。",
+  "systemPromptTemplate": "你是一个文件系统管理专员。你的职责是帮助用户进行文件和应用操作，以及文件整理和清理。",
   "enabled": true,
   "priority": 50,
   "metadata": {
-    "version": "1.0.0",
-    "author": "SmartAgent4"
+    "version": "1.0.1",
+    "author": "SmartAgent4",
+    "changelog": "补充文件整理工具和能力标签，对齐llmConfig与真实实现"
   }
 }
