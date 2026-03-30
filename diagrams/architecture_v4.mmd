@@ -1,0 +1,59 @@
+graph TD
+    subgraph 用户层
+        User((用户))
+    end
+
+    subgraph 前端UI
+        Settings[设置页\n主动服务开关]
+        Chat[聊天界面]
+    end
+
+    subgraph 核心对话管线 [Supervisor Graph]
+        CE["contextEnrichNode<br>(组装上下文)"]
+        Classify[classifyNode]
+        Execute[executeNode]
+        Respond[respondNode]
+        Extract["memoryExtractionNode<br>(提取记忆)"]
+        Reflect["reflectionNode<br>(自进化)"]
+    end
+
+    subgraph 记忆系统 [Memory System]
+        WM[("工作记忆<br>Map")]
+        Pipeline[四层过滤提取管道]
+        DB[("PostgreSQL<br>长期记忆")]
+        
+        subgraph 第四轮新增: 主动记忆引擎
+            Detector["行为模式检测器<br>behaviorDetector"]
+            Engine["意图预测引擎<br>proactiveEngine"]
+            Cache[("预取缓存<br>Prefetch Cache")]
+        end
+        
+        Cron["memoryCron<br>(后台调度器)"]
+    end
+
+    User <--> Chat
+    User --> Settings
+
+    Chat --> CE
+    CE --> Classify
+    Classify --> Execute
+    Execute --> Respond
+    Respond --> Extract
+    Extract --> Reflect
+
+    %% 被动记忆流
+    Extract --> Pipeline
+    Pipeline --> DB
+    CE <--> DB
+
+    %% 主动记忆流 (memU 理念)
+    Extract --> Detector
+    Detector --> DB
+    
+    Cron -.->|"定时调度 (每2h)"| Engine
+    DB --> Engine
+    Engine -->|预测结果| Cache
+    
+    CE -.->|优先命中| Cache
+    
+    Settings -.->|"proactiveService=enabled"| Cron
