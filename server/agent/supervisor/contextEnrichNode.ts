@@ -26,6 +26,7 @@ import {
   getCompactEmotionTagInstructions,
 } from "../../emotions/emotionTagInstructions";
 import { getEmotionsClient } from "../../emotions/emotionsClient";
+import { getPrefetchCache } from "../../memory/prefetchCache";
 
 /**
  * 上下文增强节点
@@ -69,10 +70,32 @@ export async function contextEnrichNode(
   }
 
   try {
+    // === 第四轮迭代新增：检查预取缓存 ===
+    let prefetchHit = false;
+    let cachedMemoryContext = "";
+
+    if (!isNewSession) {
+      const prefetchCache = getPrefetchCache();
+      const cachedEntry = prefetchCache.get(userId);
+      if (cachedEntry && cachedEntry.formattedContext) {
+        prefetchHit = true;
+        cachedMemoryContext = cachedEntry.formattedContext;
+        console.log(
+          `[ContextEnrichNode] Prefetch cache HIT for user ${userId}, ` +
+            `intent="${cachedEntry.predictedIntent.intent.substring(0, 50)}..."`
+        );
+      }
+    }
+
     // === 并行执行记忆检索和画像构建 ===
     // 新建会话时跳过记忆检索，只获取用户画像（称呼等基本信息）
+    // 缓存命中时使用缓存的上下文，跳过实时检索
     const [memoryContext, userProfile, emotionsAvailable] = await Promise.all([
-      isNewSession ? Promise.resolve("") : getFormattedMemoryContext(userId, userText),
+      isNewSession
+        ? Promise.resolve("")
+        : prefetchHit
+          ? Promise.resolve(cachedMemoryContext)
+          : getFormattedMemoryContext(userId, userText),
       getUserProfileSnapshot(userId),
       getEmotionsClient().isAvailable(),
     ]);
@@ -102,6 +125,7 @@ export async function contextEnrichNode(
         `character=${characterId}, ` +
         `memories=${retrievedMemories.length}, ` +
         `isNewSession=${isNewSession}, ` +
+        `prefetchHit=${prefetchHit}, ` +
         `profileName=${userProfile.displayName || "unknown"}, ` +
         `emotions=${emotionsAvailable ? "enabled" : "disabled"}, ` +
         `promptLength=${dynamicSystemPrompt.length}`

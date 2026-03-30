@@ -15,6 +15,7 @@ import {
   extractMemoriesFromConversation,
   appendWorkingMemory,
 } from "../../memory/memorySystem";
+import { detectAndPersistPatterns } from "../../memory/behaviorDetector";
 
 /**
  * 记忆提取节点
@@ -87,6 +88,25 @@ export async function memoryExtractionNode(
         console.log(
           `[MemoryExtractionNode] Extracted ${memories.length} new memories for user ${userId}`
         );
+
+        // === 第四轮迭代新增：异步触发行为模式检测（fire-and-forget） ===
+        detectAndPersistPatterns({
+          userId,
+          conversationHistory,
+          extractedMemories: memories.map((m) => ({
+            kind: m.kind,
+            type: m.type,
+            content: m.content,
+            importance: m.importance,
+            confidence: m.confidence,
+          })),
+          timestamp: new Date().toISOString(),
+        }).catch((err) => {
+          console.error(
+            "[MemoryExtractionNode] Behavior detection failed:",
+            (err as Error).message
+          );
+        });
       }
     })
     .catch((error) => {
