@@ -3,9 +3,14 @@
  *
  * 定义 Agent Card 数据结构、注册表接口、动态 Prompt 组装器接口
  * 和委托协议接口。这些类型构成了多智能体协同架构的核心契约。
+ *
+ * V2 增强（第五轮迭代）：
+ * - DelegateRequest 增加 forkContext 和 async 字段
+ * - IDynamicPromptAssembler 增加 buildSeparated* 方法
  */
 
 import type { DomainAgentInterface, AgentExecutionOutput } from "../domains/types";
+import type { ForkContext } from "../events/types";
 
 // ==================== Agent Card 数据结构 ====================
 
@@ -169,6 +174,8 @@ export interface IAgentCardRegistry {
  *
  * 运行时遍历 AgentCardRegistry，将所有已注册 Agent 的名称、
  * 描述和工具列表动态拼接为 LLM Prompt 片段。
+ *
+ * V2 增强（第五轮迭代）：新增 buildSeparated* 方法用于 Prompt Caching 优化
  */
 export interface IDynamicPromptAssembler {
   /**
@@ -188,6 +195,22 @@ export interface IDynamicPromptAssembler {
    * 用于注入到其他 Prompt 中
    */
   getAgentCapabilitySummary(): string;
+
+  /**
+   * 构建分离的分类 Prompt（第五轮迭代新增）
+   *
+   * 将静态规则与动态 Agent 列表分离，提高 Prompt Caching 命中率。
+   * @returns 分离的 Prompt 载荷
+   */
+  buildSeparatedClassifyPrompt(): { staticSystemPrompt: string; dynamicContentMessage: string };
+
+  /**
+   * 构建分离的规划 Prompt（第五轮迭代新增）
+   *
+   * 将静态规划原则与动态 Agent/工具列表分离。
+   * @returns 分离的 Prompt 载荷
+   */
+  buildSeparatedPlanPrompt(): { staticSystemPrompt: string; dynamicContentMessage: string };
 }
 
 // ==================== 委托协议接口 ====================
@@ -196,6 +219,10 @@ export interface IDynamicPromptAssembler {
  * 委托请求
  *
  * Agent 在执行过程中发现能力不足时，构造委托请求。
+ *
+ * V2 增强（第五轮迭代）：
+ * - 新增 forkContext 字段，支持 Fork 子代理模式
+ * - 新增 async 字段，支持异步委托（事件驱动通知）
  */
 export interface DelegateRequest {
   /** 需要的能力标签 */
@@ -206,6 +233,10 @@ export interface DelegateRequest {
   context?: Record<string, unknown>;
   /** 当前委托深度（防止无限递归） */
   depth?: number;
+  /** Fork 上下文，如果提供，则子代理将继承父代理的对话历史和缓存（第五轮迭代新增） */
+  forkContext?: ForkContext;
+  /** 是否异步执行（触发事件通知而非阻塞等待）（第五轮迭代新增） */
+  async?: boolean;
 }
 
 /**
@@ -220,6 +251,8 @@ export interface DelegateResult {
   delegatedTo: string;
   /** 错误信息（失败时） */
   error?: string;
+  /** 异步任务 ID（当 async=true 时返回，用于后续查询结果）（第五轮迭代新增） */
+  asyncTaskId?: string;
   /** 工具调用记录 */
   toolCalls?: Array<{
     toolName: string;

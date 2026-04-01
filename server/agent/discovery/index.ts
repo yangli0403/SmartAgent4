@@ -3,6 +3,8 @@
  *
  * 导出 Agent Card 注册表、动态 Prompt 组装器、并行执行引擎
  * 和所有相关类型。
+ *
+ * V2 增强（第五轮迭代）：新增 DynamicPromptPayload 导出
  */
 
 // 类型定义
@@ -31,6 +33,7 @@ export {
 export {
   DynamicPromptAssembler,
   createDynamicPromptAssembler,
+  type DynamicPromptPayload,
 } from "./dynamicPromptAssembler";
 
 // 并行执行引擎

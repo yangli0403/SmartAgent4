@@ -5,6 +5,8 @@
  * - buildClassifyPrompt()：分类节点 Prompt 生成
  * - buildPlanPrompt()：规划节点 Prompt 生成
  * - getAgentCapabilitySummary()：能力摘要
+ * - buildSeparatedClassifyPrompt()：分离的分类 Prompt（V5 新增）
+ * - buildSeparatedPlanPrompt()：分离的规划 Prompt（V5 新增）
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -184,6 +186,143 @@ describe("DynamicPromptAssembler", () => {
       expect(prompt).toContain("steps");
       expect(prompt).toContain("targetAgent");
       expect(prompt).toContain("expectedTools");
+    });
+  });
+
+  // ==================== buildSeparatedClassifyPrompt (V5 新增) ====================
+
+  describe("buildSeparatedClassifyPrompt()", () => {
+    it("应返回包含 staticSystemPrompt 和 dynamicContentMessage 的载荷", () => {
+      registry.register(createTestCard({ id: "fileAgent" }));
+
+      const payload = assembler.buildSeparatedClassifyPrompt();
+
+      expect(payload).toHaveProperty("staticSystemPrompt");
+      expect(payload).toHaveProperty("dynamicContentMessage");
+      expect(typeof payload.staticSystemPrompt).toBe("string");
+      expect(typeof payload.dynamicContentMessage).toBe("string");
+    });
+
+    it("静态部分不应包含动态 Agent 信息", () => {
+      registry.register(
+        createTestCard({ id: "fileAgent", description: "文件管理专员" })
+      );
+
+      const payload = assembler.buildSeparatedClassifyPrompt();
+
+      // 静态部分不应包含具体的 Agent ID
+      expect(payload.staticSystemPrompt).not.toContain("fileAgent");
+      expect(payload.staticSystemPrompt).not.toContain("文件管理专员");
+    });
+
+    it("静态部分应包含固定的规则和格式", () => {
+      registry.register(createTestCard());
+
+      const payload = assembler.buildSeparatedClassifyPrompt();
+
+      expect(payload.staticSystemPrompt).toContain("智能任务分类器");
+      expect(payload.staticSystemPrompt).toContain("领域分类规则");
+      expect(payload.staticSystemPrompt).toContain("复杂度判断规则");
+      expect(payload.staticSystemPrompt).toContain("输出格式");
+    });
+
+    it("动态部分应包含所有已注册 Agent 的信息", () => {
+      registry.register(
+        createTestCard({ id: "fileAgent", description: "文件管理专员" })
+      );
+      registry.register(
+        createTestCard({ id: "navAgent", description: "导航出行专员" })
+      );
+
+      const payload = assembler.buildSeparatedClassifyPrompt();
+
+      expect(payload.dynamicContentMessage).toContain("fileAgent");
+      expect(payload.dynamicContentMessage).toContain("文件管理专员");
+      expect(payload.dynamicContentMessage).toContain("navAgent");
+      expect(payload.dynamicContentMessage).toContain("导航出行专员");
+    });
+
+    it("注册表变化时静态部分应保持不变", () => {
+      const payload1 = assembler.buildSeparatedClassifyPrompt();
+
+      registry.register(createTestCard({ id: "newAgent" }));
+      const payload2 = assembler.buildSeparatedClassifyPrompt();
+
+      expect(payload1.staticSystemPrompt).toBe(payload2.staticSystemPrompt);
+      expect(payload1.dynamicContentMessage).not.toBe(
+        payload2.dynamicContentMessage
+      );
+    });
+
+    it("应排除 disabled 的 Agent", () => {
+      registry.register(createTestCard({ id: "enabled", enabled: true }));
+      registry.register(createTestCard({ id: "disabled", enabled: false }));
+
+      const payload = assembler.buildSeparatedClassifyPrompt();
+
+      expect(payload.dynamicContentMessage).toContain("enabled");
+      expect(payload.dynamicContentMessage).not.toContain("- disabled:");
+    });
+  });
+
+  // ==================== buildSeparatedPlanPrompt (V5 新增) ====================
+
+  describe("buildSeparatedPlanPrompt()", () => {
+    it("应返回包含 staticSystemPrompt 和 dynamicContentMessage 的载荷", () => {
+      registry.register(createTestCard());
+
+      const payload = assembler.buildSeparatedPlanPrompt();
+
+      expect(payload).toHaveProperty("staticSystemPrompt");
+      expect(payload).toHaveProperty("dynamicContentMessage");
+    });
+
+    it("静态部分不应包含动态 Agent 信息", () => {
+      registry.register(
+        createTestCard({
+          id: "fileAgent",
+          name: "文件管理专员",
+          tools: ["search_files"],
+        })
+      );
+
+      const payload = assembler.buildSeparatedPlanPrompt();
+
+      expect(payload.staticSystemPrompt).not.toContain("fileAgent");
+      expect(payload.staticSystemPrompt).not.toContain("search_files");
+    });
+
+    it("静态部分应包含规划原则", () => {
+      registry.register(createTestCard());
+
+      const payload = assembler.buildSeparatedPlanPrompt();
+
+      expect(payload.staticSystemPrompt).toContain("规划原则");
+      expect(payload.staticSystemPrompt).toContain("原子操作");
+      expect(payload.staticSystemPrompt).toContain("并行执行");
+    });
+
+    it("动态部分应包含 Agent 的工具列表", () => {
+      registry.register(
+        createTestCard({
+          id: "fileAgent",
+          name: "文件管理专员",
+          tools: ["search_files", "open_file"],
+        })
+      );
+
+      const payload = assembler.buildSeparatedPlanPrompt();
+
+      expect(payload.dynamicContentMessage).toContain("search_files, open_file");
+    });
+
+    it("注册表变化时静态部分应保持不变", () => {
+      const payload1 = assembler.buildSeparatedPlanPrompt();
+
+      registry.register(createTestCard({ id: "newAgent" }));
+      const payload2 = assembler.buildSeparatedPlanPrompt();
+
+      expect(payload1.staticSystemPrompt).toBe(payload2.staticSystemPrompt);
     });
   });
 
