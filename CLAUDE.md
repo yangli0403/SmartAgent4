@@ -2,7 +2,7 @@
 
 > 本文件是 SmartAgent4 项目的**高层架构浓缩版**，专为 AI 编程助手设计。
 > 在每次代码分析或优化对话开始时，请优先阅读本文件以快速建立项目全局视角。
-> **最后更新：** 2026-03-30（第四轮迭代 Phase 6b — 主动记忆引擎）
+> **最后更新：** 2026-04-01（第五轮迭代 Phase 9 — 借鉴 Claude Code 的工程化优化）
 
 ---
 
@@ -38,16 +38,17 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
   → [respondNode]           生成最终回复（含情感标签）
   → [memoryExtractionNode]  异步 fire-and-forget 记忆提取
      ↘ [behaviorDetector]   异步 fire-and-forget 行为模式检测
+     ↘ [DreamGatekeeper]    触发后台 Worker 进行记忆整合与预测
   → [reflectionNode]        异步自进化：工具效用更新 + Prompt 补丁
   → AI 回复
 ```
 
 | 节点 | 文件路径 | 职责 |
 |------|---------|------|
-| **contextEnrichNode** | `server/agent/supervisor/contextEnrichNode.ts` | **[第四轮增强] 检查预取缓存** + 检索记忆 + 构建用户画像 + 生成动态 System Prompt |
-| classifyNode | `server/agent/supervisor/classifyNode.ts` | 意图分类，动态 Prompt 注入，按复杂度路由 |
-| planNode | `server/agent/supervisor/planNode.ts` | 复杂任务多步规划，动态 Agent 列表 + 并行执行提示 |
-| parallelExecuteNode | `server/agent/discovery/parallelExecuteEngine.ts` | DAG 拓扑排序 + Promise.all 并行分发 |
+| **contextEnrichNode** | `server/agent/supervisor/contextEnrichNode.ts` | 检查预取缓存 + 检索记忆 + 构建用户画像 + 生成动态 System Prompt |
+| classifyNode | `server/agent/supervisor/classifyNode.ts` | **[第五轮增强]** 意图分类，**Prompt Caching 动态信息分离** |
+| planNode | `server/agent/supervisor/planNode.ts` | **[第五轮增强]** 复杂任务多步规划，**Prompt Caching 动态信息分离** |
+| parallelExecuteNode | `server/agent/discovery/parallelExecuteEngine.ts` | DAG 拓扑排序 + 并行分发 |
 | executeNode | `server/agent/supervisor/executeNode.ts` | 串行调度（旧 AgentRegistry 兼容模式） |
 | replanNode | `server/agent/supervisor/replanNode.ts` | 评估执行结果，决定继续执行或进入响应 |
 | respondNode | `server/agent/supervisor/respondNode.ts` | 使用动态 Prompt 生成最终回复（含情感标签） |
@@ -81,16 +82,20 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 | Prefetch Cache | `server/memory/prefetchCache.ts` | 内存级 LRU + TTL 缓存，存储预取好的记忆上下文。 |
 | Memory Cron | `server/memory/memoryCron.ts` | 后台调度器，新增 `PREDICTION_INTERVAL` (默认 2h) 触发预测周期。 |
 
-## 5. 多智能体协同架构（第三轮迭代新增）
+## 5. 多智能体协同架构（第三轮/第五轮迭代增强）
 
 ### 5.1 Agent Card 动态发现
 
 启动时：`agent-cards/*.json` → `AgentCardRegistry` → 校验注册
-运行时：`DynamicPromptAssembler` 动态拼接 Prompt；`parallelExecuteNode` 拓扑排序并行执行；`BaseAgent.delegate()` 横向委托。
+运行时：`DynamicPromptAssembler` 动态拼接 Prompt（**[第五轮增强]** 分离静态规则与动态内容，优化 Prompt Caching）；`parallelExecuteNode` 拓扑排序并行执行；`BaseAgent.delegate()` 横向委托。
 
-### 5.2 委托协议
+### 5.2 委托协议与 Fork 子代理模式
 
-`BaseAgent.delegate(request)` 通过 `AgentCardRegistry.findByCapability()` 查找目标 Agent，直接调用 `agent.execute()` 实现同步横向委托。委托深度限制为 3 层（`MAX_DELEGATE_DEPTH = 3`）。
+`BaseAgent.delegate(request)` 通过 `AgentCardRegistry.findByCapability()` 查找目标 Agent。
+**[第五轮增强]** 引入 Fork 子代理模式：
+- **上下文共享**：通过 `ForkContext` 传递父代理的对话历史和用户上下文，减少 Token 消耗。
+- **事件驱动通知**：支持 `async=true` 异步委托，子代理完成后通过 `AgentEventBus` 发布 `TaskCompleted` 事件，替代硬阻塞的 `Promise.all`。
+- 委托深度限制为 3 层（`MAX_DELEGATE_DEPTH = 3`）。
 
 ## 6. 三层记忆系统
 
@@ -102,8 +107,9 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 四层过滤管道（预过滤 → LLM 提取 → 置信度门控 → 动态去重）
     ↓ 写入
 长期记忆（PostgreSQL memories 表）
-    ↓ 后台定时任务
+    ↓ **[第五轮增强]** DreamGatekeeper 复合触发门控（时间+消息数量）
 记忆巩固（LLM 聚类提炼）+ 记忆遗忘（艾宾浩斯衰减）+ 意图预测预取（主动记忆引擎）
+    ↓ **[第五轮增强]** MemoryWorkerManager 异步隔离执行
 ```
 
 ### 6.2 四层过滤管道
@@ -141,7 +147,7 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 - **配置**：`vitest.config.ts`
 - **运行**：`pnpm test` 或 `npx vitest run`
 - **覆盖率**：`npx vitest run --coverage`
-- **现状**：432 个测试全部通过（含第四轮迭代新增的 26 个主动记忆引擎测试）。
+- **现状**：480 个测试全部通过（含第五轮迭代新增的 63 个工程化优化测试）。
 
 ## 10. 开发约定
 
