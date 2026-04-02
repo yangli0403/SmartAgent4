@@ -2,8 +2,8 @@
  * GeneralAgent — 通用对话专员
  *
  * 负责处理不属于特定领域的通用对话、知识问答等任务。
- * 不绑定 MCP 工具，纯 LLM 对话。
- * 内部运行 LangGraph ReACT 循环（继承 BaseAgent，无工具时直接返回 LLM 回复）。
+ * 记忆系统技能化改造后，绑定记忆管理工具，具备主动记忆调度能力。
+ * 内部运行 LangGraph ReACT 循环（继承 BaseAgent）。
  */
 
 import { BaseAgent } from "./baseAgent";
@@ -17,7 +17,7 @@ import type { MCPManager } from "../../mcp/mcpManager";
 /** GeneralAgent 默认配置 */
 export const GENERAL_AGENT_CONFIG: DomainAgentConfig = {
   name: "generalAgent",
-  description: "通用对话专员，负责知识问答、闲聊、建议等通用任务",
+  description: "通用对话专员，负责知识问答、闲聊、建议等通用任务，具备记忆管理能力",
   systemPrompt: `你是一个智能助手，擅长回答各种问题、提供建议、进行友好的对话，以及完成创意写作任务。
 
 操作原则：
@@ -26,9 +26,10 @@ export const GENERAL_AGENT_CONFIG: DomainAgentConfig = {
 3. 根据用户的语气和需求调整回复风格
 4. 提供有价值的补充信息和建议
 5. 保持友好、专业的态度
-6. 当用户要求写诗、写故事、写文章等创意写作任务时，必须直接输出完整的创作内容，不要只回复评论性文字`,
-  toolNames: [],
-  maxIterations: 1,
+6. 当用户要求写诗、写故事、写文章等创意写作任务时，必须直接输出完整的创作内容，不要只回复评论性文字
+7. 你具备记忆管理能力，请根据 System Prompt 中的记忆技能使用策略主动使用记忆工具`,
+  toolNames: ["memory_store", "memory_search", "memory_update", "memory_forget"],
+  maxIterations: 5,
   temperature: 0.7,
   maxTokens: 4000,
 };

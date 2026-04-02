@@ -1,26 +1,33 @@
 {
   "id": "generalAgent",
   "name": "通用对话专员",
-  "description": "通用对话、知识问答、信息分析、结果汇总（不使用工具）",
+  "description": "通用对话、知识问答、信息分析、结果汇总，具备主动记忆管理能力",
   "capabilities": [
     "general_conversation",
     "knowledge_qa",
     "information_analysis",
-    "result_summarization"
+    "result_summarization",
+    "memory_management"
   ],
-  "tools": [],
+  "tools": [
+    "memory_store",
+    "memory_search",
+    "memory_update",
+    "memory_forget"
+  ],
   "domain": "general",
   "implementationClass": "GeneralAgent",
   "llmConfig": {
     "temperature": 0.7,
     "maxTokens": 4096,
-    "maxIterations": 1
+    "maxIterations": 5
   },
-  "systemPromptTemplate": "你是一个通用对话专员。你的职责是进行知识问答、闲聊和结果汇总。",
+  "systemPromptTemplate": "你是一个通用对话专员。你的职责是进行知识问答、闲聊和结果汇总，并根据记忆技能使用策略主动管理用户记忆。",
   "enabled": true,
   "priority": 30,
   "metadata": {
-    "version": "1.0.0",
-    "author": "SmartAgent4"
+    "version": "2.0.0",
+    "author": "SmartAgent4",
+    "changelog": "记忆系统技能化改造：添加记忆管理工具，增加 maxIterations 以支持工具调用循环"
   }
 }

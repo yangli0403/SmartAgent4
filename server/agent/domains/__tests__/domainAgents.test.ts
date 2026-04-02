@@ -153,8 +153,12 @@ describe("Domain Agents", () => {
       expect(desc.includes("通用") || desc.includes("对话") || desc.includes("general")).toBe(true);
     });
 
-    it("工具列表应为空（纯 LLM 对话）", () => {
-      expect(agent.availableTools.length).toBe(0);
+    it("工具列表应包含记忆技能工具", () => {
+      expect(agent.availableTools).toContain("memory_store");
+      expect(agent.availableTools).toContain("memory_search");
+      expect(agent.availableTools).toContain("memory_update");
+      expect(agent.availableTools).toContain("memory_forget");
+      expect(agent.availableTools.length).toBe(4);
     });
 
     it("系统提示词应包含对话指引", () => {

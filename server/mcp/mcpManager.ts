@@ -11,6 +11,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { ToolRegistry, type RegisteredTool, type ToolCategory } from "./toolRegistry";
 import { callFreeWeatherTool } from "./freeWeatherTools";
+import { callMemoryTool, MEMORY_TOOLS_SERVER_ID } from "../agent/tools/memoryTools";
 
 // 内置工具的 serverId 前缀
 const BUILTIN_SERVER_PREFIX = "builtin-";
@@ -324,7 +325,13 @@ export class MCPManager implements IMCPManager {
       );
       const startTime = Date.now();
       try {
-        const result = await callFreeWeatherTool(toolName, args);
+        // 根据 serverId 分发到不同的内置工具处理器
+        let result: unknown;
+        if (tool.serverId === MEMORY_TOOLS_SERVER_ID) {
+          result = await callMemoryTool(toolName, args);
+        } else {
+          result = await callFreeWeatherTool(toolName, args);
+        }
         console.log(`[MCPManager] Builtin tool ${toolName} completed in ${Date.now() - startTime}ms`);
         return result;
       } catch (error) {

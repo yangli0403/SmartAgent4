@@ -2,7 +2,7 @@
 
 > 本文件是 SmartAgent4 项目的**高层架构浓缩版**，专为 AI 编程助手设计。
 > 在每次代码分析或优化对话开始时，请优先阅读本文件以快速建立项目全局视角。
-> **最后更新：** 2026-04-01（第五轮迭代 Phase 9 — 借鉴 Claude Code 的工程化优化）
+> **最后更新：** 2026-04-02（第六轮迭代 Phase 6 — 记忆系统技能化改造）
 
 ---
 
@@ -36,8 +36,8 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
      或 [executeNode]       串行调度（旧注册表兼容模式）
   → [replanNode]            评估结果，决定继续或响应
   → [respondNode]           生成最终回复（含情感标签）
-  → [memoryExtractionNode]  异步 fire-and-forget 记忆提取
-     ↘ [behaviorDetector]   异步 fire-and-forget 行为模式检测
+  → [memoryExtractionNode]  更新工作记忆 + 异步 fire-and-forget 记忆提取（受开关控制）
+     ↘ [behaviorDetector]   异步 fire-and-forget 行为模式检测（受开关控制）
      ↘ [DreamGatekeeper]    触发后台 Worker 进行记忆整合与预测
   → [reflectionNode]        异步自进化：工具效用更新 + Prompt 补丁
   → AI 回复
@@ -52,7 +52,7 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 | executeNode | `server/agent/supervisor/executeNode.ts` | 串行调度（旧 AgentRegistry 兼容模式） |
 | replanNode | `server/agent/supervisor/replanNode.ts` | 评估执行结果，决定继续执行或进入响应 |
 | respondNode | `server/agent/supervisor/respondNode.ts` | 使用动态 Prompt 生成最终回复（含情感标签） |
-| **memoryExtractionNode** | `server/agent/supervisor/memoryExtractionNode.ts` | 异步 fire-and-forget，从对话中提取记忆；**[第四轮增强] 触发行为模式检测** |
+| **memoryExtractionNode** | `server/agent/supervisor/memoryExtractionNode.ts` | 更新工作记忆，异步提取新记忆（受开关控制） |
 | reflectionNode | `server/agent/supervisor/reflectionNode.ts` | 异步反思：分析执行质量、更新工具效用分数、生成 Prompt 补丁 |
 
 图定义入口：`server/agent/supervisor/supervisorGraph.ts` → `buildSupervisorGraph()`
@@ -104,7 +104,8 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 ```
 工作记忆（内存 Map，30 分钟 TTL）
     ↓ 对话结束时
-四层过滤管道（预过滤 → LLM 提取 → 置信度门控 → 动态去重）
+Agent 主动记忆技能 (memory_store/search/update/forget) 
+  或 四层过滤管道（受 AUTO_EXTRACTION_ENABLED 开关控制，默认关闭）
     ↓ 写入
 长期记忆（PostgreSQL memories 表）
     ↓ **[第五轮增强]** DreamGatekeeper 复合触发门控（时间+消息数量）
@@ -112,14 +113,13 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
     ↓ **[第五轮增强]** MemoryWorkerManager 异步隔离执行
 ```
 
-### 6.2 四层过滤管道
+### 6.2 记忆技能化改造（第六轮迭代）
 
-| 层级 | 名称 | 机制 |
-|------|------|------|
-| Layer 1 | 预过滤 | 拦截空消息、短内容（< 4字符）、纯问候语 |
-| Layer 2 | 增强版 LLM 提取 | 结构化 Prompt（kind/type/importance/confidence/versionGroup），含正反面示例 |
-| Layer 3 | 置信度门控 | importance >= 0.3, confidence >= 0.4, type 白名单校验 |
-| Layer 4 | 动态阈值去重 | Jaccard 字符相似度 + 子串包含 + 自适应阈值（50/200 条分界） |
+将记忆的定义权和执行权交还给 Agent，实现从"被动捕获"到"主动调度"的范式转变：
+1. **主动记忆工具**：新增 `memory_store`、`memory_search`、`memory_update`、`memory_forget` 四个内置工具。
+2. **System Prompt 策略**：注入任务总结、模糊消解、状态更新三大策略，引导 Agent 在正确时机调用工具。
+3. **降级自动提取**：默认关闭每轮对话后的自动 LLM 提取，大幅降低 Token 消耗（预计降低 50%-80%）。
+4. **兼容后台服务**：Agent 主动存入的记忆（`source: "agent_skill"`）完全兼容现有的记忆巩固和意图预测管道。
 
 ## 7. 自进化闭环
 
@@ -147,7 +147,7 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 - **配置**：`vitest.config.ts`
 - **运行**：`pnpm test` 或 `npx vitest run`
 - **覆盖率**：`npx vitest run --coverage`
-- **现状**：480 个测试全部通过（含第五轮迭代新增的 63 个工程化优化测试）。
+- **现状**：510 个测试全部通过（含第六轮迭代新增的 30 个记忆技能测试）。
 
 ## 10. 开发约定
 

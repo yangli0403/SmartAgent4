@@ -23,6 +23,7 @@ import { MultimediaAgent } from "./domains/multimediaAgent";
 import { GeneralAgent } from "./domains/generalAgent";
 import { registerFreeWeatherTools } from "../mcp/freeWeatherTools";
 import { registerFileOrganizerTools } from "../mcp/fileOrganizerRegistration";
+import { registerMemoryTools } from "./tools/memoryTools";
 import {
   runSupervisor,
   type SupervisorInput,
@@ -94,6 +95,10 @@ export class SmartAgentApp {
     // 2.6 注册文件整理大师工具（SmartAgent4 新增）
     registerFileOrganizerTools(this.toolRegistry);
     console.log("[SmartAgentApp] File organizer tools registered");
+
+    // 2.7 注册记忆技能工具（记忆系统技能化改造）
+    registerMemoryTools(this.toolRegistry);
+    console.log("[SmartAgentApp] Memory skill tools registered");
 
     // 3. 注入 MCP 工具调用能力到 Context Manager
     this.contextManager.setMCPCallTool(

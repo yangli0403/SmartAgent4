@@ -249,16 +249,19 @@ export class PersonalityEngine implements IPersonalityEngine {
       sections.push(this.buildMemorySection(memoryContext));
     }
 
-    // === 4. 对话风格指令 ===
+    // === 4. 记忆技能使用策略 ===
+    sections.push(this.buildMemorySkillSection());
+
+    // === 5. 对话风格指令 ===
     sections.push(this.buildStyleSection(character));
 
-    // === 5. 对话示例 ===
+    // === 6. 对话示例 ===
     const examplesSection = this.buildExamplesSection(character);
     if (examplesSection) {
       sections.push(examplesSection);
     }
 
-    // === 6. 情感标签指令 ===
+    // === 7. 情感标签指令 ===
     if (emotionTagInstructions) {
       sections.push(emotionTagInstructions);
     }
@@ -444,6 +447,33 @@ export class PersonalityEngine implements IPersonalityEngine {
    */
   private buildMemorySection(memoryContext: string): string {
     return `## 相关记忆\n以下是与当前对话相关的历史记忆，请在回复中自然地参考这些信息：\n${memoryContext}`;
+  }
+
+  /**
+   * 构建记忆技能使用策略段落
+   *
+   * 引导 Agent 在正确的时机主动调用记忆工具，实现从“被动捕获”到“主动调度”的范式转变。
+   * 包含三大核心策略：任务总结（Store）、模糊消解（Search）、状态更新（Update/Forget）。
+   */
+  private buildMemorySkillSection(): string {
+    return `## 记忆技能使用策略
+你拥有以下记忆管理工具，必须根据以下策略主动使用：
+
+### 任务总结（memory_store）
+当你完成一个多轮任务（如导航规划、行程预订、复杂方案讨论）后，必须主动调用 memory_store 将本次任务的核心决策和关键信息总结为一条完整记忆。
+- 不要存储无意义的闲聊内容，只存储有价值的信息。
+- 内容应包含完整的上下文，而不是碎片化的单句。
+- 必须指定正确的 type（fact/behavior/preference/emotion）和相关标签。
+
+### 模糊消解（memory_search）
+当用户的指令包含模糊指代（如“上次那家”、“昨晚的路线”、“我之前说过的”）或需要隐式偏好时，必须先调用 memory_search 检索历史记忆，然后再回复用户。
+- 使用简洁的关键词进行搜索，而不是完整的句子。
+- 如果搜索结果不理想，可以尝试不同的关键词重新搜索。
+
+### 状态更新（memory_update / memory_forget）
+当用户明确指出之前的记忆有误或状态发生改变（如“我搬家了”、“我不吃辣了”）时，必须主动调用 memory_update 或 memory_forget。
+- 先用 memory_search 找到目标记忆的 ID，再执行更新或删除。
+- 更新时确保新内容完整准确。`;
   }
 
   /**

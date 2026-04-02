@@ -2,8 +2,14 @@
  * Memory Extraction Node — 记忆提取节点
  *
  * 在 respondNode 之后执行，负责：
- * 1. 从本轮对话中异步提取新记忆
- * 2. 更新工作记忆
+ * 1. 更新工作记忆（始终执行）
+ * 2. 从本轮对话中异步提取新记忆（可通过开关控制）
+ *
+ * 记忆系统技能化改造：
+ * - 新增 AUTO_EXTRACTION_ENABLED 开关，默认关闭自动提取
+ * - Agent 已具备 memory_store 等主动记忆技能，不再依赖每轮自动提取
+ * - 工作记忆更新始终保留，确保会话上下文完整性
+ * - 行为模式检测仅在自动提取启用时触发
  *
  * 这是一个"fire-and-forget"节点，不阻塞回复的返回。
  * 来源：SmartAgent2 的 extractor.ts 的异步记忆提取逻辑。
@@ -17,16 +23,44 @@ import {
 } from "../../memory/memorySystem";
 import { detectAndPersistPatterns } from "../../memory/behaviorDetector";
 
+// ==================== 配置 ====================
+
+/**
+ * 自动记忆提取开关
+ *
+ * 记忆系统技能化改造后，Agent 已具备 memory_store / memory_search 等
+ * 主动记忆技能，可在多轮任务结束时主动进行全局总结并存储。
+ *
+ * 设为 false 时：
+ * - 跳过每轮对话的自动 extractMemoriesFromConversation 调用
+ * - 大幅降低 LLM Token 消耗（预计降低 50%-80%）
+ * - 工作记忆更新不受影响
+ *
+ * 设为 true 时：
+ * - 恢复旧行为，每轮对话自动触发四层过滤管道提取
+ * - 适用于需要兼容旧模式或 Agent 主动记忆能力不足的场景
+ *
+ * 可通过环境变量 MEMORY_AUTO_EXTRACTION 覆盖：
+ * - MEMORY_AUTO_EXTRACTION=true  启用自动提取
+ * - MEMORY_AUTO_EXTRACTION=false 禁用自动提取（默认）
+ */
+export const AUTO_EXTRACTION_ENABLED: boolean =
+  process.env.MEMORY_AUTO_EXTRACTION === "true" ? true : false;
+
 /**
  * 记忆提取节点
  *
- * 在每次对话回复生成后执行，异步提取并存储新记忆。
+ * 在每次对话回复生成后执行。
+ * - 始终更新工作记忆（内存级，不消耗 LLM Token）
+ * - 根据 AUTO_EXTRACTION_ENABLED 开关决定是否触发自动提取
  * 不修改 SupervisorState，仅触发副作用。
  */
 export async function memoryExtractionNode(
   state: SupervisorStateType
 ): Promise<Partial<SupervisorStateType>> {
-  console.log("[MemoryExtractionNode] Starting memory extraction...");
+  console.log(
+    `[MemoryExtractionNode] Starting... (autoExtraction=${AUTO_EXTRACTION_ENABLED})`
+  );
 
   const { messages, context, finalResponse } = state;
 
@@ -63,7 +97,7 @@ export async function memoryExtractionNode(
     conversationHistory.push({ role: "assistant", content: finalResponse });
   }
 
-  // === 更新工作记忆 ===
+  // === 更新工作记忆（始终执行，不消耗 LLM Token） ===
   const lastUserMsg = conversationHistory
     .filter((m) => m.role === "user")
     .pop();
@@ -77,7 +111,16 @@ export async function memoryExtractionNode(
     });
   }
 
-  // === 异步提取记忆（fire-and-forget） ===
+  // === 自动提取记忆（受开关控制） ===
+  if (!AUTO_EXTRACTION_ENABLED) {
+    console.log(
+      "[MemoryExtractionNode] Auto extraction disabled (skills-based memory mode). " +
+        "Working memory updated. Skipping LLM extraction pipeline."
+    );
+    return {};
+  }
+
+  // === 以下为旧模式：异步提取记忆（fire-and-forget） ===
   // 使用 Promise 但不 await，避免阻塞响应
   extractMemoriesFromConversation({
     userId,
