@@ -9,9 +9,10 @@
  *
  * 这是 SmartAgent3 新增的核心节点，实现了"越用越懂你"的个性化能力。
  *
- * 优化（v2）：
- * - 新建会话（对话历史为空）时不注入历史记忆，避免跨会话污染
- * - 通过 messages 列表长度判断是否为新会话（只有 1 条消息 = 当前用户消息）
+ * 记忆注入：
+ * - 长期记忆按用户维度存储，新建会话时也应根据当前问题检索并注入，否则「从公司回家」等
+ *   首条消息无法看到住址/公司事实（与 Cockpit 记忆卡片不一致）。
+ * - 仍用 messages 长度记录 isNewSession，仅用于日志与观测。
  */
 
 import type { SupervisorStateType } from "./state";
@@ -66,7 +67,9 @@ export async function contextEnrichNode(
   const isNewSession = humanMessages.length <= 1;
 
   if (isNewSession) {
-    console.log("[ContextEnrichNode] New session detected, skipping memory injection to avoid cross-session contamination");
+    console.log(
+      "[ContextEnrichNode] New session (first turn): still retrieving long-term memories for user"
+    );
   }
 
   try {
@@ -74,28 +77,23 @@ export async function contextEnrichNode(
     let prefetchHit = false;
     let cachedMemoryContext = "";
 
-    if (!isNewSession) {
-      const prefetchCache = getPrefetchCache();
-      const cachedEntry = prefetchCache.get(userId);
-      if (cachedEntry && cachedEntry.formattedContext) {
-        prefetchHit = true;
-        cachedMemoryContext = cachedEntry.formattedContext;
-        console.log(
-          `[ContextEnrichNode] Prefetch cache HIT for user ${userId}, ` +
-            `intent="${cachedEntry.predictedIntent.intent.substring(0, 50)}..."`
-        );
-      }
+    const prefetchCache = getPrefetchCache();
+    const cachedEntry = prefetchCache.get(userId);
+    if (cachedEntry && cachedEntry.formattedContext) {
+      prefetchHit = true;
+      cachedMemoryContext = cachedEntry.formattedContext;
+      console.log(
+        `[ContextEnrichNode] Prefetch cache HIT for user ${userId}, ` +
+          `intent="${cachedEntry.predictedIntent.intent.substring(0, 50)}..."`
+      );
     }
 
     // === 并行执行记忆检索和画像构建 ===
-    // 新建会话时跳过记忆检索，只获取用户画像（称呼等基本信息）
-    // 缓存命中时使用缓存的上下文，跳过实时检索
+    // 缓存命中时使用预取的格式化记忆；否则按用户 + 当前问句检索长期记忆
     const [memoryContext, userProfile, emotionsAvailable] = await Promise.all([
-      isNewSession
-        ? Promise.resolve("")
-        : prefetchHit
-          ? Promise.resolve(cachedMemoryContext)
-          : getFormattedMemoryContext(userId, userText),
+      prefetchHit
+        ? Promise.resolve(cachedMemoryContext)
+        : getFormattedMemoryContext(userId, userText),
       getUserProfileSnapshot(userId),
       getEmotionsClient().isAvailable(),
     ]);
@@ -111,7 +109,7 @@ export async function contextEnrichNode(
     const dynamicSystemPrompt = personalityEngine.buildSystemPrompt({
       characterId: characterId || "xiaozhi",
       userProfile,
-      memoryContext,  // 新建会话时为空字符串，不会注入记忆段
+      memoryContext,
       emotionTagInstructions: emotionInstructions,
     });
 

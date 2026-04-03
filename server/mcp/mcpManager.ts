@@ -12,6 +12,10 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { ToolRegistry, type RegisteredTool, type ToolCategory } from "./toolRegistry";
 import { callFreeWeatherTool } from "./freeWeatherTools";
 import { callMemoryTool, MEMORY_TOOLS_SERVER_ID } from "../agent/tools/memoryTools";
+import {
+  callFileOrganizerTool,
+  BUILTIN_FILE_ORGANIZER_SERVER_ID,
+} from "./fileOrganizerRuntime";
 
 // 内置工具的 serverId 前缀
 const BUILTIN_SERVER_PREFIX = "builtin-";
@@ -329,6 +333,8 @@ export class MCPManager implements IMCPManager {
         let result: unknown;
         if (tool.serverId === MEMORY_TOOLS_SERVER_ID) {
           result = await callMemoryTool(toolName, args);
+        } else if (tool.serverId === BUILTIN_FILE_ORGANIZER_SERVER_ID) {
+          result = await callFileOrganizerTool(toolName, args);
         } else {
           result = await callFreeWeatherTool(toolName, args);
         }

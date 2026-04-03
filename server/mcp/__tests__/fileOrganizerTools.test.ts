@@ -10,6 +10,9 @@ import {
   findDuplicatesTool,
   deleteFilesTool,
   moveFilesTool,
+  getDiskHealthTool,
+  scanSystemJunkTool,
+  executeAdvancedCleanupTool,
 } from "../fileOrganizerTools";
 import { registerFileOrganizerTools } from "../fileOrganizerRegistration";
 import { ToolRegistry } from "../toolRegistry";
@@ -91,20 +94,43 @@ describe("File Organizer Tool Definitions", () => {
     });
     expect(parsed.success).toBe(true);
   });
+
+  it("get_disk_health 应接受可选盘符", () => {
+    expect(getDiskHealthTool.name).toBe("get_disk_health");
+    const p = getDiskHealthTool.parameters.safeParse({ driveLetter: "D" });
+    expect(p.success).toBe(true);
+  });
+
+  it("scan_system_junk 应支持浏览器缓存开关", () => {
+    expect(scanSystemJunkTool.name).toBe("scan_system_junk");
+    const p = scanSystemJunkTool.parameters.safeParse({
+      maxFilesPerRoot: 1000,
+      includeBrowserCaches: true,
+    });
+    expect(p.success).toBe(true);
+  });
+
+  it("execute_advanced_cleanup 为预览模式", () => {
+    expect(executeAdvancedCleanupTool.name).toBe("execute_advanced_cleanup");
+    expect(executeAdvancedCleanupTool.description).toContain("不执行");
+  });
 });
 
 // ==================== 工具注册测试 ====================
 
 describe("File Organizer Registration", () => {
-  it("应该成功注册 4 个文件整理工具", () => {
+  it("应该成功注册 7 个文件整理相关工具", () => {
     const registry = new ToolRegistry();
     registerFileOrganizerTools(registry);
 
-    expect(registry.size()).toBe(4);
+    expect(registry.size()).toBe(7);
     expect(registry.get("analyze_directory")).toBeDefined();
     expect(registry.get("find_duplicates")).toBeDefined();
     expect(registry.get("delete_files")).toBeDefined();
     expect(registry.get("move_files")).toBeDefined();
+    expect(registry.get("get_disk_health")).toBeDefined();
+    expect(registry.get("scan_system_junk")).toBeDefined();
+    expect(registry.get("execute_advanced_cleanup")).toBeDefined();
   });
 
   it("注册的工具应属于 file_system 类别", () => {
@@ -112,7 +138,7 @@ describe("File Organizer Registration", () => {
     registerFileOrganizerTools(registry);
 
     const tools = registry.getByCategory("file_system");
-    expect(tools.length).toBe(4);
+    expect(tools.length).toBe(7);
   });
 
   it("注册的工具应属于 builtin-file-organizer 服务", () => {
@@ -120,7 +146,7 @@ describe("File Organizer Registration", () => {
     registerFileOrganizerTools(registry);
 
     const tools = registry.getByServer("builtin-file-organizer");
-    expect(tools.length).toBe(4);
+    expect(tools.length).toBe(7);
   });
 
   it("注册的工具应包含有效的 inputSchema", () => {

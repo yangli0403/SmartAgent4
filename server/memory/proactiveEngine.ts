@@ -335,6 +335,28 @@ export async function runPredictionCycle(): Promise<void> {
   );
 }
 
+/**
+ * 手动触发：为指定用户执行意图预测 + 记忆预取（与定时任务中的单用户逻辑一致）。
+ * 若未开启 proactiveService、无近期对话或置信度不足，会返回 ok:false。
+ */
+export async function runPredictionAndPrefetchForUser(
+  userId: number
+): Promise<{ ok: boolean; message: string }> {
+  const predicted = await predictIntent(userId);
+  if (!predicted) {
+    return {
+      ok: false,
+      message:
+        "未执行预测/预取（需开启 proactiveService、有近期对话且模型置信度足够）",
+    };
+  }
+  await prefetchContext(userId, predicted);
+  return {
+    ok: true,
+    message: `已预测并预取：${predicted.intent.slice(0, 120)}`,
+  };
+}
+
 // ==================== 单例导出 ====================
 
 let engineStarted = false;

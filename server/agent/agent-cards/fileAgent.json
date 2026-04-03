@@ -26,7 +26,10 @@
     "analyze_directory",
     "find_duplicates",
     "delete_files",
-    "move_files"
+    "move_files",
+    "get_disk_health",
+    "scan_system_junk",
+    "execute_advanced_cleanup"
   ],
   "domain": "file_system",
   "implementationClass": "FileAgent",

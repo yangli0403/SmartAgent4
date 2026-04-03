@@ -25,7 +25,12 @@ export {
 } from "./state";
 
 // 节点
-export { classifyNode, routeByComplexity, CLASSIFY_SYSTEM_PROMPT } from "./classifyNode";
+export {
+  classifyNode,
+  routeByComplexity,
+  CLASSIFY_SYSTEM_PROMPT,
+  resolveAgentsForDomain,
+} from "./classifyNode";
 export { planNode, PLAN_SYSTEM_PROMPT } from "./planNode";
 export { createExecuteNode, resolveInputMapping, type AgentRegistry } from "./executeNode";
 export { replanNode, shouldContinueAfterReplan, REPLAN_SYSTEM_PROMPT } from "./replanNode";

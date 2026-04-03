@@ -33,8 +33,25 @@ import {
   getAgentCardRegistry,
   type IAgentCardRegistry,
 } from "./discovery";
+import type { AgentCard } from "./discovery/types";
 import type { BaseAgent } from "./domains/baseAgent";
 import * as path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/**
+ * implementationClass → 动态加载对应域 Agent 模块（esbuild 可静态分析依赖）
+ * 新增 Agent 时在此增加一行即可，无需在 createAndBind 里手写 new。
+ */
+/** 模块含类与其它导出，不能用 Record<..., new ...> 收窄，运行时只取 implementationClass 同名导出 */
+const AGENT_MODULE_LOADERS: Record<string, () => Promise<unknown>> = {
+  FileAgent: () => import("./domains/fileAgent.js"),
+  NavigationAgent: () => import("./domains/navigationAgent.js"),
+  MultimediaAgent: () => import("./domains/multimediaAgent.js"),
+  GeneralAgent: () => import("./domains/generalAgent.js"),
+};
 
 // ==================== 应用实例 ====================
 
@@ -122,8 +139,8 @@ export class SmartAgentApp {
       console.warn("[SmartAgentApp] Falling back to hardcoded agent registration");
     }
 
-    // 5. 创建 Domain Agent 实例并绑定
-    this.createAndBindAgents();
+    // 5. 创建 Domain Agent 实例并绑定（按 Card 动态加载，失败则静态降级）
+    await this.createAndBindAgents();
 
     this.initialized = true;
 
@@ -143,11 +160,60 @@ export class SmartAgentApp {
   /**
    * 创建 Domain Agent 实例并绑定到注册表
    *
-   * 根据 Agent Card 配置创建对应的 Agent 实例。
-   * 如果注册表为空（Agent Card 加载失败），则使用硬编码方式注册。
+   * 优先按 Card 的 `implementationClass` 动态 import 并实例化；
+   * 若注册表为空或全部失败，则使用硬编码静态创建。
    */
-  private createAndBindAgents(): void {
-    // Agent 实例映射表：Agent ID → Agent 实例
+  private async createAndBindAgents(): Promise<void> {
+    const enabled = this.agentCardRegistry.getAllEnabled();
+    let bound = 0;
+
+    if (enabled.length > 0) {
+      const sorted = [...enabled].sort((a, b) => b.priority - a.priority);
+      for (const card of sorted) {
+        try {
+          const agent = await this.instantiateAgentFromCard(card);
+          this.agentCardRegistry.bindAgent(card.id, agent);
+          agent.setAgentCardRegistry(this.agentCardRegistry);
+          bound++;
+        } catch (e) {
+          console.error(
+            `[SmartAgentApp] Failed to instantiate ${card.id}:`,
+            (e as Error).message
+          );
+        }
+      }
+    }
+
+    if (bound === 0) {
+      console.warn(
+        "[SmartAgentApp] No agents from dynamic load; using static fallback"
+      );
+      this.createAndBindAgentsStaticFallback();
+    } else {
+      console.log(`[SmartAgentApp] ${bound} agent(s) bound via Card loaders`);
+    }
+  }
+
+  private async instantiateAgentFromCard(card: AgentCard): Promise<BaseAgent> {
+    const impl = card.implementationClass;
+    const load = AGENT_MODULE_LOADERS[impl];
+    if (!load) {
+      throw new Error(
+        `Unknown implementationClass "${impl}" — add a loader in smartAgentApp.ts`
+      );
+    }
+    const mod = (await load()) as Record<string, unknown>;
+    const Ctor = mod[impl] as new (m: MCPManager) => BaseAgent;
+    if (typeof Ctor !== "function") {
+      throw new Error(`Module for ${impl} has no export "${impl}"`);
+    }
+    return new Ctor(this.mcpManager);
+  }
+
+  /**
+   * Agent Card 未加载或动态实例化全部失败时的硬编码路径
+   */
+  private createAndBindAgentsStaticFallback(): void {
     const agentInstances: Record<string, BaseAgent> = {
       fileAgent: new FileAgent(this.mcpManager),
       navigationAgent: new NavigationAgent(this.mcpManager),
@@ -155,13 +221,10 @@ export class SmartAgentApp {
       generalAgent: new GeneralAgent(this.mcpManager),
     };
 
-    // 绑定到注册表
     for (const [agentId, agent] of Object.entries(agentInstances)) {
       if (this.agentCardRegistry.has(agentId)) {
-        // Agent Card 已加载，绑定实例
         this.agentCardRegistry.bindAgent(agentId, agent);
       } else {
-        // Agent Card 未加载，手动注册（降级路径）
         console.warn(
           `[SmartAgentApp] Agent Card not found for ${agentId}, registering with defaults`
         );
@@ -182,22 +245,16 @@ export class SmartAgentApp {
           agent
         );
       }
-
-      // 注入 AgentCardRegistry 引用，启用委托能力
       agent.setAgentCardRegistry(this.agentCardRegistry);
     }
 
     console.log(
-      `[SmartAgentApp] ${Object.keys(agentInstances).length} agents created and bound`
+      `[SmartAgentApp] ${Object.keys(agentInstances).length} agents created (static fallback)`
     );
   }
 
-  /**
-   * 根据 Agent ID 推断领域（降级用）
-   */
-  private inferDomain(
-    agentId: string
-  ): "file_system" | "navigation" | "multimedia" | "general" | "custom" {
+  /** 根据 Agent ID 推断领域（静态降级注册用） */
+  private inferDomain(agentId: string): string {
     if (agentId.includes("file")) return "file_system";
     if (agentId.includes("navigation")) return "navigation";
     if (agentId.includes("multimedia")) return "multimedia";

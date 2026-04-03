@@ -8,7 +8,7 @@
  *   - 右上角：用户头像 + 设置
  *   - 中间主体：车辆模型（作为背景图融入）
  *   - 右侧：助手反馈面板（仅含对话列表，无输入框）
- *   - 底部：等宽等高固定小卡片（会话管理 + 智能记忆）
+ *   - 底部：等宽等高固定小卡片（会话管理 + 用户记忆）
  */
 
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -51,6 +51,7 @@ export default function Cockpit() {
         { role: "assistant", content: data.response },
       ]);
       utils.chat.listSessions.invalidate();
+      void utils.memory.list.invalidate();
       if (data.persisted === false) {
         toast.warning("对话未保存到服务器，刷新后可能丢失。");
       }
@@ -364,7 +365,7 @@ export default function Cockpit() {
           </div>
         </div>
 
-        {/* 智能记忆卡片 */}
+        {/* 用户记忆卡片 */}
         <MemoryCards />
       </div>
     </div>

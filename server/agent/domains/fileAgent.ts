@@ -48,7 +48,12 @@ export const FILE_AGENT_CONFIG: DomainAgentConfig = {
 - 第一步：使用 analyze_directory 扫描目录，向用户展示概况
 - 第二步：使用 find_duplicates 找出同名和重复文件
 - 第三步：向用户展示可清理的文件列表和预计释放空间
-- 第四步：等待用户确认后，使用 delete_files 或 move_files 执行操作`,
+- 第四步：等待用户确认后，使用 delete_files 或 move_files 执行操作
+
+磁盘与系统垃圾（只读/建议，不擅自执行系统命令）：
+11. 用户询问「C 盘空间」「磁盘健康」时，使用 get_disk_health 查看已用/剩余与提示
+12. 用户希望「看看能清多少垃圾」「临时文件占多少」时，使用 scan_system_junk 做白名单路径体量估算（可设 includeBrowserCaches 包含 Chrome 缓存，可能较慢）
+13. 用户要求「深度清理」「DISM」「组件存储」时，仅使用 execute_advanced_cleanup 给出**建议命令与警告**，绝不自动执行 cleanmgr/DISM；提醒用户自行在管理员终端评估后运行`,
   toolNames: [
     // 基础文件系统工具
     "search_files",
@@ -68,6 +73,9 @@ export const FILE_AGENT_CONFIG: DomainAgentConfig = {
     "find_duplicates",
     "delete_files",
     "move_files",
+    "get_disk_health",
+    "scan_system_junk",
+    "execute_advanced_cleanup",
   ],
   maxIterations: 8, // 文件整理可能需要更多轮次
   temperature: 0.3,

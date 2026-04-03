@@ -145,10 +145,18 @@ function inferCategory(content: string): string {
   return "general";
 }
 
+/** 用于排序：优先使用 updatedAt，否则 createdAt */
+function memoryRecencyMs(m: Memory): number {
+  const u = m.updatedAt ? new Date(m.updatedAt).getTime() : 0;
+  const c = m.createdAt ? new Date(m.createdAt).getTime() : 0;
+  return Math.max(u, c);
+}
+
 /**
  * 格式化记忆为上下文文本
  *
  * 将记忆列表格式化为可注入 System Prompt 的文本。
+ * 排序：**先按更新时间（新→旧）**，再按 importance，避免旧住址与新房址同时出现时模型总采信旧条。
  *
  * @param memories 记忆列表
  * @param maxLength 最大字符数（防止 Prompt 过长）
@@ -160,10 +168,11 @@ export function formatMemoriesForContext(
 ): string {
   if (memories.length === 0) return "";
 
-  // 按重要性排序
-  const sorted = [...memories].sort(
-    (a, b) => b.importance - a.importance
-  );
+  const sorted = [...memories].sort((a, b) => {
+    const byTime = memoryRecencyMs(b) - memoryRecencyMs(a);
+    if (byTime !== 0) return byTime;
+    return b.importance - a.importance;
+  });
 
   const lines: string[] = [];
   let totalLength = 0;

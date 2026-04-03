@@ -5,7 +5,13 @@
  * classifyNode 本身依赖 LLM，通过 mock 测试。
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { routeByComplexity, CLASSIFY_SYSTEM_PROMPT } from "../classifyNode";
+import {
+  routeByComplexity,
+  CLASSIFY_SYSTEM_PROMPT,
+  resolveAgentsForDomain,
+} from "../classifyNode";
+import { AgentCardRegistry } from "../../discovery/agentCardRegistry";
+import type { AgentCard } from "../../discovery/types";
 import type { SupervisorStateType, TaskClassification } from "../state";
 import { HumanMessage } from "@langchain/core/messages";
 
@@ -96,6 +102,56 @@ describe("ClassifyNode", () => {
         taskClassification: null,
       });
       expect(routeByComplexity(state)).toBe("execute");
+    });
+  });
+
+  describe("resolveAgentsForDomain", () => {
+    function minimalCard(
+      id: string,
+      domain: string,
+      priority = 50
+    ): AgentCard {
+      return {
+        id,
+        name: id,
+        description: "t",
+        capabilities: [],
+        tools: [],
+        domain,
+        implementationClass: "GeneralAgent",
+        llmConfig: { temperature: 0.7, maxTokens: 4096, maxIterations: 5 },
+        systemPromptTemplate: "",
+        enabled: true,
+        priority,
+      };
+    }
+
+    it("应通过 findByDomain 解析自定义领域到对应 Agent", () => {
+      const r = new AgentCardRegistry();
+      r.register(minimalCard("customA", "my_custom_domain", 80));
+      expect(resolveAgentsForDomain("my_custom_domain", r)).toEqual([
+        "customA",
+      ]);
+    });
+
+    it("同域多 Card 时应取 priority 最高者（注册表已排序）", () => {
+      const r = new AgentCardRegistry();
+      r.register(minimalCard("low", "file_system", 10));
+      r.register(minimalCard("high", "file_system", 90));
+      expect(resolveAgentsForDomain("file_system", r)).toEqual(["high"]);
+    });
+
+    it("cross_domain 应只返回注册表中存在的 Agent", () => {
+      const r = new AgentCardRegistry();
+      r.register(minimalCard("navigationAgent", "navigation"));
+      expect(resolveAgentsForDomain("cross_domain", r)).toEqual([
+        "navigationAgent",
+      ]);
+    });
+
+    it("无 Card 时 file_system 应回退到 fileAgent", () => {
+      const r = new AgentCardRegistry();
+      expect(resolveAgentsForDomain("file_system", r)).toEqual(["fileAgent"]);
     });
   });
 });

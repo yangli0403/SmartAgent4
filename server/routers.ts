@@ -39,6 +39,7 @@ import {
   updateMemory,
   deleteMemory,
 } from "./memory/memorySystem";
+import { runUserMemoryMaintenance } from "./memory/memoryMaintenance";
 import {
   PERSONALITIES,
   type PersonalityType,
@@ -375,6 +376,45 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const success = await deleteMemory(input.id);
         return { success };
+      }),
+
+    /**
+     * 手动触发记忆后台任务（与定时 cron 对应，便于调试无需等待数小时）
+     */
+    runMaintenance: protectedProcedure
+      .input(
+        z
+          .object({
+            jobs: z
+              .array(
+                z.enum([
+                  "consolidation",
+                  "forgetting",
+                  "prediction",
+                  "prefetch_cache_cleanup",
+                ])
+              )
+              .optional(),
+            all: z.boolean().optional(),
+          })
+          .optional()
+      )
+      .mutation(async ({ ctx, input }) => {
+        const user = await ensureUser(ctx);
+        const raw = input ?? {};
+        const jobs =
+          raw.all === true || !raw.jobs?.length
+            ? ("all" as const)
+            : raw.jobs;
+        try {
+          return await runUserMemoryMaintenance(user.id, jobs);
+        } catch (e) {
+          console.error("[Memory] runMaintenance failed:", e);
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: (e as Error).message || "后台任务执行失败",
+          });
+        }
       }),
   }),
 

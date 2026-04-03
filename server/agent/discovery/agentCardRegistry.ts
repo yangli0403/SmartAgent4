@@ -11,11 +11,7 @@
 import { z } from "zod";
 import { readdir, readFile } from "fs/promises";
 import { join } from "path";
-import type {
-  AgentCard,
-  AgentDomain,
-  IAgentCardRegistry,
-} from "./types";
+import type { AgentCard, IAgentCardRegistry } from "./types";
 import type { DomainAgentInterface } from "../domains/types";
 
 // ==================== Agent Card JSON Schema（Zod 校验） ====================
@@ -31,7 +27,7 @@ export const AgentCardSchema = z.object({
   description: z.string().min(1, "Agent 描述不能为空"),
   capabilities: z.array(z.string()).default([]),
   tools: z.array(z.string()).default([]),
-  domain: z.enum(["file_system", "navigation", "multimedia", "general", "custom"]),
+  domain: z.string().min(1, "domain 不能为空"),
   implementationClass: z.string().min(1),
   llmConfig: z.object({
     temperature: z.number().min(0).max(2).default(0.7),
@@ -200,7 +196,7 @@ export class AgentCardRegistry implements IAgentCardRegistry {
   /**
    * 按领域查找 Agent
    */
-  findByDomain(domain: AgentDomain): AgentCard[] {
+  findByDomain(domain: string): AgentCard[] {
     return this.getAllEnabled()
       .filter((card) => card.domain === domain)
       .sort((a, b) => b.priority - a.priority);

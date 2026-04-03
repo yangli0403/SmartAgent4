@@ -10,7 +10,7 @@
  *
  * 设计原则：
  * - Agent 必须在调用 delete_files 前向用户展示列表并获取明确确认
- * - 所有路径操作限制在用户目录范围内（安全白名单）
+ * - 路径策略与 pathPolicy 一致：读操作用白名单目录，写操作默认仅用户主目录内
  */
 
 import { z } from "zod";
@@ -114,6 +114,52 @@ export const moveFilesTool = {
   }),
 };
 
+/** C 盘 / 卷空间与健康度（Windows 优先使用 PowerShell） */
+export const getDiskHealthTool = {
+  name: "get_disk_health",
+  description:
+    "获取指定盘符的已用/剩余空间与大致健康提示（Windows 使用 Get-PSDrive）。",
+  parameters: z.object({
+    driveLetter: z
+      .string()
+      .optional()
+      .default("C")
+      .describe("盘符，如 C（不要带冒号）"),
+  }),
+};
+
+/** 扫描常见系统/用户垃圾目录体量（只读统计，不删除） */
+export const scanSystemJunkTool = {
+  name: "scan_system_junk",
+  description:
+    "对临时目录、下载目录、Windows\\Temp 等白名单路径做体量估算（采样扫描，不删除文件）。",
+  parameters: z.object({
+    maxFilesPerRoot: z
+      .number()
+      .optional()
+      .default(8000)
+      .describe("每个根目录最多统计的文件数，防止过久阻塞"),
+    includeBrowserCaches: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("是否包含 Chrome Default\\Cache（可能较慢）"),
+  }),
+};
+
+/** 高级清理：仅返回建议命令与风险提示，不执行任何操作 */
+export const executeAdvancedCleanupTool = {
+  name: "execute_advanced_cleanup",
+  description:
+    "提供 Windows 深度清理相关命令建议（cleanmgr、DISM 等），不执行；需用户自行在管理员终端运行。",
+  parameters: z.object({
+    acknowledgeRisk: z
+      .boolean()
+      .optional()
+      .describe("用户已了解风险（可选，仅占位）"),
+  }),
+};
+
 // ==================== 返回类型定义 ====================
 
 /** 文件类型统计 */
@@ -210,13 +256,66 @@ export interface MoveFilesResult {
  */
 export const fileOrganizerServerCode = `
 // ============== 文件整理大师 MCP Server 实现 ==============
-// 保存为: mcp-file-organizer-server.js
-// 运行: node mcp-file-organizer-server.js
+// 与 SmartAgent 内置 pathPolicy + fileOrganizerRuntime 行为对齐（读/写白名单 + 7 工具）。
+// 嵌入总脚本时：依赖外层已 require 的 fs, path, os, child_process.execFileSync
+// 独立单文件运行时：取消下行注释并删除本说明
+// const fs = require('fs'); const path = require('path'); const os = require('os');
+// const { execFileSync } = require('child_process');
 
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
-const os = require('os');
+
+// ---------- pathPolicy（与 server/mcp/pathPolicy.ts 一致）----------
+function homeDir() {
+  return path.resolve(os.homedir());
+}
+function expandTilde(p) {
+  if (!p.startsWith('~')) return p;
+  var rest = p.slice(1);
+  while (
+    rest.length &&
+    (rest.charCodeAt(0) === 47 || rest.charCodeAt(0) === 92)
+  ) {
+    rest = rest.slice(1);
+  }
+  return path.join(os.homedir(), rest);
+}
+function normalizePath(p) {
+  return path.resolve(path.normalize(String(p).trim()));
+}
+function getAllowedReadRoots() {
+  const roots = [homeDir(), path.resolve(os.tmpdir())];
+  if (process.platform === 'win32') {
+    roots.push(path.resolve('C:/Windows/Temp'));
+    const local = process.env.LOCALAPPDATA;
+    if (local) roots.push(path.resolve(local, 'Temp'));
+    const programData = process.env.ProgramData;
+    if (programData) roots.push(path.resolve(programData));
+  }
+  const seen = {};
+  const out = [];
+  for (let i = 0; i < roots.length; i++) {
+    const r = path.resolve(roots[i]);
+    if (!seen[r]) {
+      seen[r] = true;
+      out.push(r);
+    }
+  }
+  return out;
+}
+function isPathAllowedForRead(inputPath) {
+  const resolved = normalizePath(expandTilde(inputPath));
+  const roots = getAllowedReadRoots();
+  const sep = path.sep;
+  return roots.some(function (root) {
+    return resolved === root || resolved.startsWith(root + sep);
+  });
+}
+function isPathAllowedForWrite(inputPath) {
+  const resolved = normalizePath(expandTilde(inputPath));
+  const h = homeDir();
+  const sep = path.sep;
+  return resolved === h || resolved.startsWith(h + sep);
+}
 
 // ============== 工具函数 ==============
 
@@ -230,15 +329,6 @@ function formatFileSize(bytes) {
 
 function expandPath(p) {
   return p.replace(/^~/, os.homedir());
-}
-
-/**
- * 安全路径校验：确保路径在用户目录范围内
- */
-function isPathSafe(filePath) {
-  const resolved = path.resolve(expandPath(filePath));
-  const home = os.homedir();
-  return resolved.startsWith(home);
 }
 
 /**
@@ -327,7 +417,12 @@ function getFileHash(filePath, quickMode = true) {
 async function analyzeDirectory(params) {
   const { directory, topLargeFiles = 10, olderThanDays = 30, recursive = true } = params;
   const expandedDir = expandPath(directory);
-
+  if (!isPathAllowedForRead(expandedDir)) {
+    return {
+      error:
+        '路径不在允许扫描的范围内（用户主目录、系统临时目录等白名单）。请调整路径后重试。',
+    };
+  }
   if (!fs.existsSync(expandedDir)) {
     return { error: '目录不存在: ' + directory };
   }
@@ -399,7 +494,11 @@ async function analyzeDirectory(params) {
 async function findDuplicates(params) {
   const { directory, matchType = 'both', recursive = true } = params;
   const expandedDir = expandPath(directory);
-
+  if (!isPathAllowedForRead(expandedDir)) {
+    return {
+      error: '路径不在允许扫描的范围内（用户主目录、系统临时目录等白名单）。',
+    };
+  }
   if (!fs.existsSync(expandedDir)) {
     return { error: '目录不存在: ' + directory };
   }
@@ -425,11 +524,11 @@ async function findDuplicates(params) {
       nameMap.set(name, group);
     }
 
-    for (const [fileName, group] of nameMap) {
+    for (const [, group] of nameMap) {
       if (group.length > 1) {
         const totalSize = group.reduce((sum, f) => sum + f.size, 0);
         result.sameNameGroups.push({
-          fileName,
+          fileName: group[0].name,
           count: group.length,
           files: group,
           totalSize,
@@ -511,11 +610,12 @@ async function deleteFiles(params) {
 
   for (const filePath of filePaths) {
     const expanded = expandPath(filePath);
-
-    // 安全校验
-    if (!isPathSafe(expanded)) {
+    if (!isPathAllowedForWrite(expanded)) {
       result.failedCount++;
-      result.errors.push({ path: filePath, error: '路径不在用户目录范围内，拒绝操作' });
+      result.errors.push({
+        path: filePath,
+        error: '路径不在允许删除/移动的范围内（当前策略：仅用户主目录内）。',
+      });
       continue;
     }
 
@@ -559,61 +659,225 @@ async function deleteFiles(params) {
 async function moveFiles(params) {
   const { sourcePaths, destinationDir } = params;
   const expandedDest = expandPath(destinationDir);
-
   const result = {
     successCount: 0,
     failedCount: 0,
     errors: [],
   };
 
-  // 确保目标目录存在
+  if (!isPathAllowedForWrite(expandedDest)) {
+    return {
+      successCount: 0,
+      failedCount: sourcePaths.length,
+      errors: [
+        {
+          path: destinationDir,
+          error: '目标目录必须在用户主目录内（安全策略）。',
+        },
+      ],
+    };
+  }
+
   if (!fs.existsSync(expandedDest)) {
     fs.mkdirSync(expandedDest, { recursive: true });
   }
 
   for (const sourcePath of sourcePaths) {
     const expanded = expandPath(sourcePath);
-
-    if (!isPathSafe(expanded)) {
+    if (!isPathAllowedForWrite(expanded)) {
       result.failedCount++;
-      result.errors.push({ path: sourcePath, error: '路径不在用户目录范围内，拒绝操作' });
+      result.errors.push({
+        path: sourcePath,
+        error: '源路径不在允许移动的范围内（当前策略：仅用户主目录内）。',
+      });
       continue;
     }
-
     try {
       if (!fs.existsSync(expanded)) {
         result.failedCount++;
         result.errors.push({ path: sourcePath, error: '文件不存在' });
         continue;
       }
-
-      const destPath = path.join(expandedDest, path.basename(expanded));
-
-      // 如果目标已存在同名文件，添加时间戳后缀
-      let finalDest = destPath;
-      if (fs.existsSync(finalDest)) {
+      let destPath = path.join(expandedDest, path.basename(expanded));
+      if (fs.existsSync(destPath)) {
         const ext = path.extname(destPath);
         const base = path.basename(destPath, ext);
-        finalDest = path.join(expandedDest, base + '_' + Date.now() + ext);
+        destPath = path.join(expandedDest, base + '_' + Date.now() + ext);
       }
-
-      fs.renameSync(expanded, finalDest);
+      fs.renameSync(expanded, destPath);
       result.successCount++;
     } catch (e) {
       result.failedCount++;
       result.errors.push({ path: sourcePath, error: e.message });
     }
   }
-
   return result;
 }
 
-// ============== 导出工具处理器映射 ==============
+function getDiskHealth(params) {
+  var letterMatch = String((params && params.driveLetter) || 'C').match(/[A-Za-z]/);
+  var raw = letterMatch ? letterMatch[0] : 'C';
+  const driveLetter = (raw || 'C').toUpperCase().slice(0, 1);
+  if (process.platform !== 'win32') {
+    try {
+      const out = execFileSync('df', ['-h', '/'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+      });
+      return {
+        platform: process.platform,
+        df: out.trim(),
+        note: '非 Windows：已返回根分区 df 摘要',
+      };
+    } catch (e) {
+      return { platform: process.platform, error: e.message };
+    }
+  }
+  try {
+    var ps =
+      "$d = Get-PSDrive -Name '" +
+      driveLetter +
+      "' -ErrorAction Stop; $cap = $d.Used + $d.Free; [PSCustomObject]@{ UsedGB = [math]::Round($d.Used/1GB,2); FreeGB = [math]::Round($d.Free/1GB,2); CapacityGB = [math]::Round($cap/1GB,2); PercentFree = if($cap -gt 0){[math]::Round(100*$d.Free/$cap,1)}else{0} } | ConvertTo-Json";
+    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], {
+      encoding: 'utf-8',
+      timeout: 20000,
+    });
+    const j = JSON.parse(out.trim());
+    const pct = j.PercentFree != null ? j.PercentFree : 0;
+    let health = 'good';
+    if (pct < 10) health = 'low_space';
+    if (pct < 5) health = 'critical';
+    return {
+      drive: driveLetter + ':',
+      usedGB: j.UsedGB,
+      freeGB: j.FreeGB,
+      capacityGB: j.CapacityGB,
+      percentFree: pct,
+      health,
+      message:
+        health === 'good'
+          ? '剩余空间充足'
+          : health === 'low_space'
+            ? '剩余空间偏低，建议清理'
+            : '剩余空间极少，请尽快清理',
+    };
+  } catch (e) {
+    return { error: e.message, drive: driveLetter + ':' };
+  }
+}
 
-module.exports = {
-  analyzeDirectory,
-  findDuplicates,
-  deleteFiles,
-  moveFiles,
-};
+function roughDirSize(dir, maxFiles) {
+  let files = 0;
+  let bytes = 0;
+  function walk(d, depth) {
+    if (files >= maxFiles) return;
+    try {
+      const list = fs.readdirSync(d);
+      for (let i = 0; i < list.length; i++) {
+        if (files >= maxFiles) return;
+        const p = path.join(d, list[i]);
+        try {
+          const st = fs.statSync(p);
+          if (st.isDirectory()) {
+            if (depth < 5) walk(p, depth + 1);
+          } else {
+            files++;
+            bytes += st.size;
+          }
+        } catch (err) {}
+      }
+    } catch (err2) {}
+  }
+  walk(dir, 0);
+  return { files, bytes };
+}
+
+function scanSystemJunk(params) {
+  const maxFilesPerRoot =
+    params && params.maxFilesPerRoot != null ? params.maxFilesPerRoot : 8000;
+  const includeBrowserCaches = !!(params && params.includeBrowserCaches);
+  const roots = [];
+  roots.push({ label: 'os.tmpdir', path: os.tmpdir() });
+  roots.push({ label: '用户下载', path: path.join(os.homedir(), 'Downloads') });
+  if (process.platform === 'win32') {
+    roots.push({ label: 'Windows-Temp', path: 'C:/Windows/Temp' });
+    if (process.env.LOCALAPPDATA) {
+      roots.push({
+        label: 'LocalAppData-Temp',
+        path: path.join(process.env.LOCALAPPDATA, 'Temp'),
+      });
+      if (includeBrowserCaches) {
+        roots.push({
+          label: 'Chrome-Default-Cache',
+          path: path.join(
+            process.env.LOCALAPPDATA,
+            'Google',
+            'Chrome',
+            'User Data',
+            'Default',
+            'Cache'
+          ),
+        });
+      }
+    }
+  }
+  const locations = [];
+  for (let i = 0; i < roots.length; i++) {
+    const label = roots[i].label;
+    const dir = roots[i].path;
+    const exp = path.resolve(expandPath(dir));
+    if (!isPathAllowedForRead(exp)) continue;
+    if (!fs.existsSync(exp)) {
+      locations.push({
+        label,
+        path: exp,
+        skipped: true,
+        reason: '路径不存在或不可访问',
+      });
+      continue;
+    }
+    const sz = roughDirSize(exp, maxFilesPerRoot);
+    locations.push({
+      label,
+      path: exp,
+      scannedFileCount: sz.files,
+      estimatedBytes: sz.bytes,
+      estimatedSize: formatFileSize(sz.bytes),
+      truncated: sz.files >= maxFilesPerRoot,
+    });
+  }
+  return {
+    scannedAt: new Date().toISOString(),
+    platform: process.platform,
+    locations,
+  };
+}
+
+function executeAdvancedCleanup(params) {
+  return {
+    mode: 'preview_only',
+    requiresAdmin: true,
+    warnings: [
+      '以下命令可能影响系统更新与稳定性，仅限有经验用户在管理员终端手动执行。',
+      '本工具不会自动运行 cleanmgr / DISM / 任何提权操作。',
+    ],
+    windowsSuggestions: [
+      { step: 1, title: '磁盘清理向导', command: 'cleanmgr /d C:' },
+      {
+        step: 2,
+        title: '分析组件存储 (只读分析)',
+        command: 'DISM /Online /Cleanup-Image /AnalyzeComponentStore',
+      },
+      {
+        step: 3,
+        title: '组件存储清理（高风险，谨慎）',
+        command: 'DISM /Online /Cleanup-Image /StartComponentCleanup',
+      },
+    ],
+    note: 'WinSxS 相关清理请先备份重要数据并查阅微软官方文档。',
+  };
+}
+
+// 嵌入 smartagent-mcp-server.js 时由同文件 switch 调用上述函数；独立运行时可：
+// module.exports = { analyzeDirectory, findDuplicates, deleteFiles, moveFiles, getDiskHealth, scanSystemJunk, executeAdvancedCleanup };
 `;

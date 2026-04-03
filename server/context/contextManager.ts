@@ -7,10 +7,12 @@
 
 import type { UserContext, UserLocation } from "../agent/supervisor/state";
 import { getUserPreferences as getDbUserPreferences } from "../db";
+import { getPreferredResidenceGeocodeQuery } from "../memory/residenceFromMemories";
+import { geocodePlaceName } from "../utils/openMeteoGeocode";
 
 // ==================== 类型定义 ====================
 
-export type LocationSource = "gps" | "ip" | "manual" | "cached";
+export type LocationSource = "gps" | "ip" | "manual" | "cached" | "memory";
 
 export interface LocationWithSource extends UserLocation {
   source: LocationSource;
@@ -105,7 +107,7 @@ export class ContextManager implements IContextManager {
   /**
    * 获取用户位置
    *
-   * 优先级：缓存（未过期）→ IP 定位 → 过期缓存
+   * 优先级：缓存（未过期）→ 记忆中的常住地（地理编码）→ IP 定位 → 过期缓存
    */
   async getLocation(
     userId: string
@@ -117,6 +119,40 @@ export class ContextManager implements IContextManager {
       const age = Date.now() - cached.obtainedAt.getTime();
       if (age < this.locationCacheTTL) {
         return cached;
+      }
+    }
+
+    const numericId = parseInt(userId, 10);
+    if (!Number.isNaN(numericId) && numericId > 0) {
+      try {
+        const residenceQuery =
+          await getPreferredResidenceGeocodeQuery(numericId);
+        if (residenceQuery) {
+          const geo = await geocodePlaceName(residenceQuery);
+          if (
+            geo &&
+            Number.isFinite(geo.latitude) &&
+            Number.isFinite(geo.longitude)
+          ) {
+            const locationWithSource: LocationWithSource = {
+              latitude: geo.latitude,
+              longitude: geo.longitude,
+              city: geo.city,
+              address: geo.address,
+              source: "memory",
+              obtainedAt: new Date(),
+            };
+            this.locationCache.set(userId, locationWithSource);
+            console.log(
+              `[ContextManager] Location from memory residence "${residenceQuery}" → ${geo.city} (memory)`
+            );
+            return locationWithSource;
+          }
+        }
+      } catch (e) {
+        console.warn(
+          `[ContextManager] Memory-based residence location failed: ${(e as Error).message}`
+        );
       }
     }
 

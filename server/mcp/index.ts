@@ -15,7 +15,16 @@
 // 导入工具模块
 import { fileSystemTools, fileSystemToolsServerCode } from './fileSystemTools';
 import { appBrowserTools, appBrowserToolsServerCode } from './appBrowserTools';
-import { analyzeDirectoryTool, findDuplicatesTool, deleteFilesTool, moveFilesTool, fileOrganizerServerCode } from './fileOrganizerTools';
+import {
+  analyzeDirectoryTool,
+  findDuplicatesTool,
+  deleteFilesTool,
+  moveFilesTool,
+  getDiskHealthTool,
+  scanSystemJunkTool,
+  executeAdvancedCleanupTool,
+  fileOrganizerServerCode,
+} from './fileOrganizerTools';
 
 // 文件整理大师工具列表
 export const fileOrganizerTools = [
@@ -23,6 +32,9 @@ export const fileOrganizerTools = [
   findDuplicatesTool,
   deleteFilesTool,
   moveFilesTool,
+  getDiskHealthTool,
+  scanSystemJunkTool,
+  executeAdvancedCleanupTool,
 ];
 
 // ============== 工具定义汇总 ==============
@@ -75,7 +87,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const { exec, spawn } = require('child_process');
+const { exec, spawn, execFileSync } = require('child_process');
 const os = require('os');
 
 const app = express();
@@ -127,6 +139,9 @@ app.get('/tools', (req, res) => {
       { name: 'find_duplicates', category: 'fileOrganizer', description: '查找重复/同名文件' },
       { name: 'delete_files', category: 'fileOrganizer', description: '安全删除文件' },
       { name: 'move_files', category: 'fileOrganizer', description: '批量移动文件' },
+      { name: 'get_disk_health', category: 'fileOrganizer', description: '磁盘空间与健康度' },
+      { name: 'scan_system_junk', category: 'fileOrganizer', description: '系统垃圾体量估算' },
+      { name: 'execute_advanced_cleanup', category: 'fileOrganizer', description: '深度清理命令建议（仅预览）' },
     ],
   });
 });
@@ -180,6 +195,15 @@ app.post('/execute', async (req, res) => {
       case 'move_files':
         result = await moveFiles(params);
         break;
+      case 'get_disk_health':
+        result = getDiskHealth(params);
+        break;
+      case 'scan_system_junk':
+        result = scanSystemJunk(params);
+        break;
+      case 'execute_advanced_cleanup':
+        result = executeAdvancedCleanup(params);
+        break;
       default:
         result = { error: \`未知工具: \${tool}\` };
     }
@@ -215,8 +239,11 @@ app.listen(PORT, () => {
   console.log('║  - analyze_directory 分析目录文件分布                     ║');
   console.log('║  - find_duplicates   查找重复/同名文件                     ║');
   console.log('║  - delete_files      安全删除文件                           ║');
-  console.log('║  - move_files        批量移动文件                           ║');
-  console.log('╚════════════════════════════════════════════════════════════╝');
+      console.log('║  - move_files        批量移动文件                           ║');
+      console.log('║  - get_disk_health   磁盘空间与健康度                       ║');
+      console.log('║  - scan_system_junk  系统垃圾体量估算                       ║');
+      console.log('║  - execute_advanced_cleanup 深度清理建议（仅预览）        ║');
+      console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('');
 });
 `;

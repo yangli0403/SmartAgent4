@@ -425,17 +425,30 @@ describe("AgentCardRegistry", () => {
       expect(() => AgentCardSchema.parse(invalidData)).toThrow();
     });
 
-    it("应拒绝无效的 domain 值", () => {
+    it("应拒绝空的 domain", () => {
       const invalidData = {
         id: "testAgent",
         name: "测试",
         description: "测试",
-        domain: "invalid_domain",
+        domain: "",
         implementationClass: "TestAgent",
         llmConfig: { temperature: 0.7, maxTokens: 4096, maxIterations: 5 },
       };
 
       expect(() => AgentCardSchema.parse(invalidData)).toThrow();
+    });
+
+    it("应接受自定义 domain 字符串", () => {
+      const data = {
+        id: "testAgent",
+        name: "测试",
+        description: "测试",
+        domain: "storage_maintenance",
+        implementationClass: "TestAgent",
+        llmConfig: { temperature: 0.7, maxTokens: 4096, maxIterations: 5 },
+      };
+      const result = AgentCardSchema.parse(data);
+      expect(result.domain).toBe("storage_maintenance");
     });
 
     it("应拒绝超出范围的 temperature", () => {

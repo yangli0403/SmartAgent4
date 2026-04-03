@@ -1,7 +1,7 @@
 /**
  * File Organizer Registration — 文件整理大师工具注册
  *
- * 将文件整理大师的 4 个工具注册到 ToolRegistry，
+ * 将文件整理大师的 7 个工具注册到 ToolRegistry，
  * 使其可被 FileAgent 通过 MCP 框架调用。
  *
  * 注册方式：内置工具（builtin），类似 freeWeatherTools 的模式。
@@ -15,7 +15,11 @@ import {
   findDuplicatesTool,
   deleteFilesTool,
   moveFilesTool,
+  getDiskHealthTool,
+  scanSystemJunkTool,
+  executeAdvancedCleanupTool,
 } from "./fileOrganizerTools";
+import { BUILTIN_FILE_ORGANIZER_SERVER_ID } from "./fileOrganizerRuntime";
 
 /**
  * 将 Zod Schema 转换为 JSON Schema（简化版）
@@ -96,6 +100,9 @@ export function registerFileOrganizerTools(registry: ToolRegistry): void {
     findDuplicatesTool,
     deleteFilesTool,
     moveFilesTool,
+    getDiskHealthTool,
+    scanSystemJunkTool,
+    executeAdvancedCleanupTool,
   ];
 
   for (const tool of tools) {
@@ -104,7 +111,7 @@ export function registerFileOrganizerTools(registry: ToolRegistry): void {
       description: tool.description,
       inputSchema: zodToJsonSchema(tool.parameters),
       inputZodSchema: tool.parameters,
-      serverId: "builtin-file-organizer",
+      serverId: BUILTIN_FILE_ORGANIZER_SERVER_ID,
       category: "file_system",
       registeredAt: new Date(),
     });

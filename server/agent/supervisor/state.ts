@@ -10,13 +10,12 @@ import type { BaseMessage } from "@langchain/core/messages";
 
 // ==================== 任务分类 ====================
 
-/** 任务所属领域 */
-export type TaskDomain =
-  | "navigation"
-  | "multimedia"
-  | "file_system"
-  | "general"
-  | "cross_domain";
+/**
+ * 任务所属领域（分类节点输出）。
+ * 内置：navigation | multimedia | file_system | general | cross_domain；
+ * 亦可与 Agent Card 的 `domain` 对齐为任意非空字符串（由注册表动态校验）。
+ */
+export type TaskDomain = string;
 
 /** 任务复杂度 */
 export type TaskComplexity = "simple" | "moderate" | "complex";

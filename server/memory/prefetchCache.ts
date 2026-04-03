@@ -144,8 +144,9 @@ class PrefetchCacheManager {
 
   /**
    * 清理所有过期条目
+   * @returns 删除的过期条目数
    */
-  cleanup(): void {
+  cleanup(): number {
     const now = Date.now();
     let cleaned = 0;
 
@@ -162,6 +163,7 @@ class PrefetchCacheManager {
           `${this.store.size} remaining`
       );
     }
+    return cleaned;
   }
 
   /**

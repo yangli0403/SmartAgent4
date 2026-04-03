@@ -94,7 +94,7 @@ export default function Home() {
               <Card>
                 <CardHeader>
                   <Brain className="h-10 w-10 text-primary mb-2" />
-                  <CardTitle>智能记忆系统</CardTitle>
+                  <CardTitle>用户记忆系统</CardTitle>
                   <CardDescription>
                     自动学习你的偏好和习惯，提供越来越个性化的服务
                   </CardDescription>

@@ -60,13 +60,8 @@ export interface AgentCard {
   metadata?: Record<string, unknown>;
 }
 
-/** Agent 领域分类 */
-export type AgentDomain =
-  | "file_system"
-  | "navigation"
-  | "multimedia"
-  | "general"
-  | "custom";
+/** Agent 领域分类（与 Task 分类 domain 对齐，允许扩展自定义值） */
+export type AgentDomain = string;
 
 /** Agent LLM 配置 */
 export interface AgentLLMConfig {
@@ -154,7 +149,7 @@ export interface IAgentCardRegistry {
    * @param domain - 领域分类
    * @returns 匹配的 Agent Card 列表
    */
-  findByDomain(domain: AgentDomain): AgentCard[];
+  findByDomain(domain: string): AgentCard[];
 
   /**
    * 获取注册表大小
