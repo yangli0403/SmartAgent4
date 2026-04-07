@@ -4,6 +4,93 @@
 
 ---
 
+## [1.4.0] - 2026-04-07
+
+### 第七轮迭代：记忆系统优化（Embedding + 智能检索 + 质量门控）
+
+本轮迭代基于 PRODUCT_SPEC.md 定义的 7 项功能需求（P0×3 + P1×4），实现记忆系统从“纯文本匹配”到“语义理解 + 智能决策 + 质量门控”的全链路升级。
+
+#### 新增模块（5个）
+
+**新增**
+- `server/memory/embeddingService.ts` — Embedding 服务
+  - DashScope / OpenAI 双通道向量化，通过环境变量自动切换
+  - 单例模式 + 延迟初始化，避免重复创建客户端
+  - 批量向量化支持，失败返回 null 优雅降级
+- `server/memory/preRetrievalDecision.ts` — 预检索决策
+  - 规则层快速过滤（闲聊/emoji/感谢/纯问候）
+  - LLM 层深度判断（是否需要检索记忆）
+  - 查询重写（代词消解、上下文补全）
+- `server/memory/extractionAudit.ts` — 提取审计层
+  - 按记忆类型动态重要性阈值（preference > fact > event > episodic）
+  - Jaccard 相似度去重（阈值 0.6）
+  - ACCEPT / REJECT / MERGE 三种审计结果
+- `server/memory/confidenceEvolution.ts` — 置信度演化
+  - BOOST：重复提及时提升置信度
+  - SUPERSEDE：矛盾信息时替代旧记忆
+  - NO_MATCH / SKIP：无关联时保持现状
+  - 基于 versionGroup 匹配同类记忆
+- `server/memory/backfillExtraction.ts` — 做梦补漏提取
+  - LLM 批量回溯提取遗漏记忆
+  - 与现有记忆去重
+  - 兼容 MemoryWorkerManager 执行器
+
+#### 修改模块（5个）
+
+**修改**
+- `server/memory/memorySystem.ts` — addMemory 集成 Embedding 生成 + Confidence 演化；getFormattedMemoryContext 支持 queryEmbedding 参数
+- `server/agent/supervisor/contextEnrichNode.ts` — 插入 Pre-Retrieval Decision 决策层 + 查询向量化 + 缓存命中/需要检索/跳过检索三路分支
+- `server/agent/tools/memoryTools.ts` — memory_store 写入前经过审计层（重要性门控 + 去重 + 合并建议）
+- `server/agent/supervisor/memoryExtractionNode.ts` — 行为检测从自动提取流程中解耦，基于对话计数器独立触发
+- `server/memory/hybridSearch.ts` — 向量不可用时自动回退到纯 BM25，动态调整 alpha 权重
+
+#### Phase 3：接口设计
+
+**新增**
+- `docs/INTERFACE_DESIGN_MEMORY_OPT.md` — 全量接口契约文档（10 个模块的方法签名、类型、配置项、错误处理约定）
+
+#### Phase 5：需求反思
+
+**修复**
+- `server/agent/tools/memoryTools.ts` — 补充 auditMemoryExtraction 调用中缺失的 kind, versionGroup, tags 参数
+- `server/agent/supervisor/memoryExtractionNode.ts` — 添加对话计数器和阈值触发逻辑
+
+**新增**
+- `REQUIREMENTS_REFLECTION.md` — 第七轮迭代需求反思报告
+
+#### Phase 6：自动化测试
+
+**新增**
+- `server/memory/__tests__/embeddingService.test.ts` — 24 个测试用例
+- `server/memory/__tests__/extractionAudit.test.ts` — 54 个测试用例
+- `server/memory/__tests__/confidenceEvolution.test.ts` — 16 个测试用例
+- `server/memory/__tests__/preRetrievalDecision.test.ts` — 46 个测试用例
+- `server/memory/__tests__/backfillExtraction.test.ts` — 15 个测试用例
+- `TESTING.md` — 全量测试文档
+
+**测试结果**
+- 全量测试：654 个（651 通过，3 个需数据库）
+- 新增模块覆盖率：语句 94.3%，函数 97.6%
+
+#### Phase 6b：AI 架构指南
+
+**修改**
+- `CLAUDE.md` — 更新为第七轮迭代版本，新增记忆系统优化章节
+
+#### Phase 7：文档与交付
+
+**修改**
+- `README.md` — 更新技术栈、测试信息、开发路线图、文档列表
+- `CHANGELOG.md` — 新增第七轮迭代变更记录
+- `PROJECT_STATUS.md` — 更新阶段状态
+
+#### 新增依赖
+
+- `openai` (^6.33.0) — 用于 Embedding API 调用（OpenAI 兼容接口）
+- `@vitest/coverage-v8` — 覆盖率报告（devDependency）
+
+---
+
 ## [1.2.0] - 2026-03-27
 
 ### 第三轮迭代：多智能体协同架构（windows-compat 分支）
