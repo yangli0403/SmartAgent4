@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-**第4阶段：子代理驱动实现** — 已完成
+**第6阶段：代码质量与覆盖率审查** — 已完成
 
 ## 阶段进度
 
@@ -12,9 +12,9 @@
 | 第2阶段：架构与设计 | ✅ 已完成 | `docs/MEMORY_OPTIMIZATION_ARCHITECTURE.md` | 5个新增模块 + 5个修改模块 + 4个数据流场景 + 5项设计决策 |
 | 第3阶段：接口与数据结构定义 | ✅ 已完成 | `docs/INTERFACE_DESIGN_MEMORY_OPT.md` + 5个代码框架文件 | 所有模块的接口契约、类型定义、配置项已定义 |
 | 第4阶段：子代理驱动实现 (TDD) | ✅ 已完成 | 5个新增模块实现 + 5个修改模块变更 + 231个单元测试 | 全部通过 |
-| 第5阶段：需求反思 | 待办 | REQUIREMENTS_REFLECTION.md | — |
-| 第6阶段：代码质量与覆盖率审查 | 待办 | TESTING.md | — |
-| 第6b阶段：生成 AI 架构指南 | 待办 | CLAUDE.md | — |
+| 第5阶段：需求反思 | ✅ 已完成 | `REQUIREMENTS_REFLECTION.md` | 修复 2 个中等问题（审计参数补全、行为检测计数器） |
+| 第6阶段：代码质量与覆盖率审查 | ✅ 已完成 | `TESTING.md` | 新增模块覆盖率 94.3%，651 个测试通过 |
+| 第6b阶段：生成 AI 架构指南 | 进行中 | `CLAUDE.md` | — |
 | 第7阶段：文档与交付 | 待办 | README.md 等 | — |
 
 ## 第4阶段详细记录
@@ -41,13 +41,15 @@
 
 ### 测试汇总
 
-- **测试文件**: 15 个全部通过
-- **测试用例**: 231 个全部通过
-- **执行时间**: ~1.6s
+- **测试文件**: 46 个（45 通过，1 个需数据库）
+- **测试用例**: 654 个（651 通过，3 个需数据库）
+- **新增模块平均语句覆盖率**: 94.3%
+- **用户测试用例自动化率**: 17/18（94.4%）
 
 ### 新增依赖
 
 - `openai` — 用于 Embedding API 调用（OpenAI 兼容接口）
+- `@vitest/coverage-v8` — 覆盖率报告（devDependency）
 
 ## 技术选型
 
@@ -75,18 +77,3 @@
 ## 新增环境变量（18个）
 
 详见 `docs/INTERFACE_DESIGN_MEMORY_OPT.md` 第4.2节。
-
-## 已有测试资产基线
-
-- `server/agent/tools/__tests__/memoryTools.test.ts` — 4 个记忆工具的参数校验、正常调用和错误处理
-- `server/agent/supervisor/__tests__/memoryExtractionNode.test.ts` — 提取节点降级开关行为
-- `server/memory/__tests__/memoryPipeline.test.ts` — 四层提取管道纯函数验证
-- `server/memory/worker/__tests__/memoryWorkerManager.test.ts` — 做梦工作管理器
-- `server/agent/supervisor/__tests__/dialogueSlots.test.ts` — 对话槽位提取
-- `server/agent/supervisor/__tests__/navigationMemoryPlan.test.ts` — 导航记忆计划
-- `server/agent/supervisor/__tests__/classifyNode.test.ts` — 分类节点
-- `server/memory/__tests__/embeddingService.test.ts` — Embedding 服务（新增）
-- `server/memory/__tests__/extractionAudit.test.ts` — 提取审计层（新增）
-- `server/memory/__tests__/confidenceEvolution.test.ts` — 置信度演化（新增）
-- `server/memory/__tests__/preRetrievalDecision.test.ts` — 检索前决策（新增）
-- `server/memory/__tests__/backfillExtraction.test.ts` — 补漏提取（新增）
