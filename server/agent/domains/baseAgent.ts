@@ -41,6 +41,58 @@ import type {
 /** 最大委托深度，防止循环委托导致无限递归 */
 const MAX_DELEGATE_DEPTH = 3;
 
+/** 任务消息中注入的对话条数上限（避免超长） */
+const MAX_CONV_CONTEXT_MESSAGES = 12;
+/** 单条对话截断长度 */
+const MAX_CONV_CONTEXT_CHARS = 600;
+
+function contentToPlainText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part: unknown) => {
+        if (typeof part === "string") return part;
+        if (
+          part &&
+          typeof part === "object" &&
+          "text" in (part as Record<string, unknown>)
+        ) {
+          return String((part as { text?: string }).text ?? "");
+        }
+        return "";
+      })
+      .join("");
+  }
+  return String(content ?? "");
+}
+
+function formatRecentConversationForTask(
+  history: BaseMessage[]
+): string | null {
+  if (!history?.length) return null;
+  const recent = history.slice(-MAX_CONV_CONTEXT_MESSAGES);
+  const lines: string[] = [];
+  for (const m of recent) {
+    const type =
+      typeof (m as { _getType?: () => string })._getType === "function"
+        ? (m as { _getType: () => string })._getType()
+        : "unknown";
+    const role =
+      type === "human" ? "用户" : type === "ai" ? "助手" : type;
+    let text = contentToPlainText(m.content).trim();
+    if (!text) continue;
+    if (text.length > MAX_CONV_CONTEXT_CHARS) {
+      text = text.slice(0, MAX_CONV_CONTEXT_CHARS) + "…";
+    }
+    lines.push(`[${role}] ${text}`);
+  }
+  if (lines.length === 0) return null;
+  return (
+    "（以下为最近对话上下文，请结合理解与本轮任务相关的地点、城市与上一需求）\n" +
+    lines.join("\n")
+  );
+}
+
 // ==================== Agent 内部状态 ====================
 
 const AgentState = Annotation.Root({
@@ -231,8 +283,11 @@ export abstract class BaseAgent implements DomainAgentInterface {
     const toolCallRecords: ToolCallRecord[] = [];
 
     try {
-      // 1. 构建 MCP 工具为 LangChain DynamicStructuredTool
-      const tools = this.buildLangChainTools(toolCallRecords);
+      // 1. 构建 MCP 工具为 LangChain DynamicStructuredTool（注入 userId 供 memory_* 使用）
+      const tools = this.buildLangChainTools(
+        toolCallRecords,
+        input.context as { userId?: string } | undefined
+      );
 
       // 2. 创建 LLM 并绑定工具
       const llm = createToolCallingLLM({
@@ -307,10 +362,18 @@ export abstract class BaseAgent implements DomainAgentInterface {
    * 工具调用时通过 MCPManager.callTool 执行。
    */
   private buildLangChainTools(
-    toolCallRecords: ToolCallRecord[]
+    toolCallRecords: ToolCallRecord[],
+    execContext?: { userId?: string }
   ): DynamicStructuredTool[] {
     const registry = this.mcpManager.getToolRegistry();
     const tools: DynamicStructuredTool[] = [];
+
+    const uidFromContext = (() => {
+      const u = execContext?.userId;
+      if (u == null || u === "") return undefined;
+      const n = parseInt(String(u), 10);
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    })();
 
     for (const toolName of this.availableTools) {
       const registeredTool = registry.get(toolName);
@@ -329,16 +392,20 @@ export abstract class BaseAgent implements DomainAgentInterface {
         description: registeredTool.description,
         schema: zodSchema,
         func: async (args: Record<string, unknown>) => {
+          let callArgs = { ...args };
+          if (toolName.startsWith("memory_") && uidFromContext != null) {
+            callArgs = { ...callArgs, userId: uidFromContext };
+          }
           const callStart = Date.now();
           try {
-            const result = await this.mcpManager.callTool(toolName, args);
+            const result = await this.mcpManager.callTool(toolName, callArgs);
             const callDuration = Date.now() - callStart;
 
             // 记录工具调用
             toolCallRecords.push({
               toolName,
               serverId: registeredTool.serverId,
-              input: args,
+              input: callArgs,
               output: result,
               status: "success",
               durationMs: callDuration,
@@ -353,7 +420,7 @@ export abstract class BaseAgent implements DomainAgentInterface {
             toolCallRecords.push({
               toolName,
               serverId: registeredTool.serverId,
-              input: args,
+              input: callArgs,
               output: (error as Error).message,
               status: "error",
               durationMs: callDuration,
@@ -452,6 +519,18 @@ export abstract class BaseAgent implements DomainAgentInterface {
       Object.keys(input.resolvedInputs).length > 0
     ) {
       message += `\n\n前置步骤提供的信息：\n${JSON.stringify(input.resolvedInputs, null, 2)}`;
+    }
+
+    const slots = input.context?.dialogueSlots;
+    if (slots && (slots.regionHint || slots.navOrigin || slots.navDestination || slots.navWaypoints?.length)) {
+      message += `\n\n${formatDialogueSlotsForTask(slots)}`;
+    }
+
+    const convSnippet = formatRecentConversationForTask(
+      input.conversationHistory ?? []
+    );
+    if (convSnippet) {
+      message += `\n\n${convSnippet}`;
     }
 
     // 附加用户原始消息

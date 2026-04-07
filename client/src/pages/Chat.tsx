@@ -17,6 +17,8 @@ import { Link, useLocation } from "wouter";
 import { Streamdown } from "streamdown";
 import { toast } from "sonner";
 import { getLoginUrl } from "@/const";
+import type { ChatUiMessage } from "@shared/chatTts";
+import { TtsPlayback } from "@/components/TtsPlayback";
 import {
   Dialog,
   DialogContent,
@@ -29,9 +31,7 @@ export default function Chat() {
   const { user, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState<
-    Array<{ role: "user" | "assistant"; content: string }>
-  >([]);
+  const [messages, setMessages] = useState<ChatUiMessage[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -44,6 +44,30 @@ export default function Chat() {
   const skipOAuth = import.meta.env.VITE_SKIP_OAUTH === "true";
 
   const utils = trpc.useUtils();
+
+  const [synthTargetIdx, setSynthTargetIdx] = useState<number | null>(null);
+
+  const synthesizeTtsMutation = trpc.chat.synthesizeAssistantTts.useMutation({
+    onError: error => {
+      toast.error("语音合成失败: " + error.message);
+      setSynthTargetIdx(null);
+    },
+  });
+
+  const handleSynthesizeAssistantTts = (idx: number, content: string) => {
+    setSynthTargetIdx(idx);
+    synthesizeTtsMutation.mutate(
+      { text: content, sessionId: currentSessionId ?? undefined },
+      {
+        onSuccess: data => {
+          setMessages(prev =>
+            prev.map((m, i) => (i === idx ? { ...m, tts: data.tts } : m))
+          );
+        },
+        onSettled: () => setSynthTargetIdx(null),
+      }
+    );
+  };
 
   const sendMessageMutation = trpc.chat.sendMessage.useMutation({
     onSuccess: data => {
@@ -316,9 +340,22 @@ export default function Chat() {
                     }`}
                   >
                     {msg.role === "assistant" ? (
-                      <Streamdown className="prose prose-sm dark:prose-invert max-w-none break-words">
-                        {msg.content}
-                      </Streamdown>
+                      <>
+                        <Streamdown className="prose prose-sm dark:prose-invert max-w-none break-words">
+                          {msg.content}
+                        </Streamdown>
+                        <TtsPlayback
+                          tts={msg.tts}
+                          lazy={!msg.tts}
+                          onSynthesize={() =>
+                            handleSynthesizeAssistantTts(idx, msg.content)
+                          }
+                          isSynthesizing={
+                            synthesizeTtsMutation.isPending &&
+                            synthTargetIdx === idx
+                          }
+                        />
+                      </>
                     ) : (
                       <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                     )}
@@ -341,6 +378,9 @@ export default function Chat() {
                     <Brain className="h-5 w-5 text-primary-foreground" />
                   </div>
                   <Card className="p-4">
+                    <p className="text-xs text-muted-foreground mb-2">
+                      正在生成回复…
+                    </p>
                     <div className="flex gap-1">
                       {[0, 150, 300].map(d => (
                         <div

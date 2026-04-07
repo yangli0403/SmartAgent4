@@ -6,7 +6,11 @@
  */
 
 import type { BaseMessage } from "@langchain/core/messages";
-import type { PlanStep, ToolCallRecord } from "../supervisor/state";
+import type {
+  PlanStep,
+  ToolCallRecord,
+  DialogueSlots,
+} from "../supervisor/state";
 
 // ==================== Agent 执行输入 ====================
 
@@ -20,11 +24,12 @@ export interface AgentExecutionInput {
   resolvedInputs: Record<string, unknown>;
   /** 对话历史（用于上下文理解） */
   conversationHistory: BaseMessage[];
-  /** 用户上下文 */
+  /** 用户上下文（可与会话槽位并存；槽位由 Supervisor 启发式抽取） */
   context?: {
-    userId: string;
+    userId?: string;
     location?: { latitude: number; longitude: number; city?: string };
-    currentTime: string;
+    currentTime?: string;
+    dialogueSlots?: DialogueSlots;
   };
 }
 

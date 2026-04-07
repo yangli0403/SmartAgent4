@@ -22,7 +22,14 @@ export {
   type ReplanAction,
   type UserContext,
   type UserLocation,
+  type DialogueSlots,
 } from "./state";
+
+export {
+  extractDialogueSlotsFromMessages,
+  mergeDialogueSlotsWithLocationCity,
+  formatDialogueSlotsForTask,
+} from "./dialogueSlots";
 
 // 节点
 export {

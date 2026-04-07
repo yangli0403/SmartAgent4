@@ -48,7 +48,12 @@ export const NAVIGATION_AGENT_CONFIG: DomainAgentConfig = {
 2. 城市定位：使用 free_ip_location 获取当前位置，如果高德工具可用也可用 maps_ip_location
 3. 如果用户没有指定城市，先用 free_ip_location 获取当前城市，再查询天气
 4. 返回结果时，重点展示温度、天气状况、湿度、风速等关键信息
-5. 如果高德地图工具不可用（未配置 API Key），告知用户当前只支持天气和定位查询`,
+5. 如果高德地图工具不可用（未配置 API Key），告知用户当前只支持天气和定位查询
+
+## 路线与 POI 检索（多轮对话必守）
+1. 若用户在**同一会话**或**最近对话上下文**中已说明起点、终点或城市（例如公司、家、区名），则视为信息已足够，**不要**再泛泛索要「具体地址」；应直接调用 maps_geo / maps_direction_* 等工具规划或检索。
+2. 用户说「途经 / 途径 / 顺路去」某 POI 时，该 POI 必须与**当前路线所在城市一致**：从最近对话中的起点/终点或「用户当前位置」中的城市推断区域，调用 maps_text_search、maps_around_search 时**必须**带上该城市/区域（或先用 maps_geo 锚定城市中心再搜），**禁止**在无城市约束下全国检索导致结果落到其他城市（如北京、香港等）。
+3. 关键词搜索时优先使用「城市名 + POI 名」组合（例如「苏州 山姆」），与路线上下文矛盾的结果应丢弃并重搜。`,
   toolNames: [
     // 免费内置工具（始终可用）
     "free_weather_by_city",       // 按城市名查天气
@@ -112,6 +117,11 @@ export class NavigationAgent extends BaseAgent {
 
     if (context?.currentTime) {
       prompt += `\n当前时间: ${context.currentTime}`;
+    }
+
+    if (context?.dialogueSlots) {
+      prompt +=
+        `\n会话槽位（城市/起终点/途经点）已注入任务消息；POI 与路径检索须与槽位一致，勿改用其他城市。`;
     }
 
     return prompt;

@@ -13,7 +13,13 @@ import type {
   IParallelExecuteEngine,
   IAgentCardRegistry,
 } from "./types";
-import type { PlanStep, StepResult, ToolCallRecord, SupervisorStateType } from "../supervisor/state";
+import type {
+  PlanStep,
+  StepResult,
+  ToolCallRecord,
+  SupervisorStateType,
+  DialogueSlots,
+} from "../supervisor/state";
 import type { DomainAgentInterface, AgentExecutionInput } from "../domains/types";
 import { HumanMessage } from "@langchain/core/messages";
 
@@ -112,7 +118,8 @@ export function createParallelExecuteNode(registry: IAgentCardRegistry) {
   return async function parallelExecuteNode(
     state: SupervisorStateType
   ): Promise<Partial<SupervisorStateType>> {
-    const { plan, currentStepIndex, stepResults, messages, context } = state;
+    const { plan, currentStepIndex, stepResults, messages, context, dialogueSlots } =
+      state;
 
     if (!plan || plan.length === 0) {
       console.warn("[ParallelExecuteEngine] No plan to execute");
@@ -161,7 +168,15 @@ export function createParallelExecuteNode(registry: IAgentCardRegistry) {
     // 并行执行本批次所有步骤
     const batchResults = await Promise.all(
       batchSteps.map((step) =>
-        executeStep(step, registry, userText, stepResults || [], messages, context)
+        executeStep(
+          step,
+          registry,
+          userText,
+          stepResults || [],
+          messages,
+          context,
+          dialogueSlots
+        )
       )
     );
 
@@ -192,7 +207,8 @@ async function executeStep(
   userMessage: string,
   previousResults: StepResult[],
   messages: any[],
-  context: any
+  context: any,
+  dialogueSlots?: DialogueSlots
 ): Promise<StepResult> {
   const startTime = Date.now();
 
@@ -219,18 +235,21 @@ async function executeStep(
     );
 
     // 3. 构建执行输入
+    const ctxPayload = {
+      ...(context && {
+        userId: context.userId,
+        location: context.location,
+        currentTime: context.currentTime,
+      }),
+      ...(dialogueSlots ? { dialogueSlots } : {}),
+    };
     const input: AgentExecutionInput = {
       step,
       userMessage,
       resolvedInputs,
       conversationHistory: messages,
-      context: context
-        ? {
-            userId: context.userId,
-            location: context.location,
-            currentTime: context.currentTime,
-          }
-        : undefined,
+      context:
+        Object.keys(ctxPayload).length > 0 ? ctxPayload : undefined,
     };
 
     // 4. 执行

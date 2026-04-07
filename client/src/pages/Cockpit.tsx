@@ -21,6 +21,7 @@ import { Send, Settings, Mic, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import AssistantPanel from "@/components/cockpit/AssistantPanel";
+import type { ChatUiMessage } from "@shared/chatTts";
 import MemoryCards from "@/components/cockpit/MemoryCards";
 import { RealtimeAsrSession } from "@/lib/realtimeAsrStream";
 
@@ -29,9 +30,7 @@ export default function Cockpit() {
   const skipOAuth = import.meta.env.VITE_SKIP_OAUTH === "true";
 
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState<
-    Array<{ role: "user" | "assistant"; content: string }>
-  >([]);
+  const [messages, setMessages] = useState<ChatUiMessage[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [isMicActive, setIsMicActive] = useState(false);
@@ -43,6 +42,30 @@ export default function Cockpit() {
   const utils = trpc.useUtils();
 
   // ==================== 后端 Mutations ====================
+
+  const [synthTargetIdx, setSynthTargetIdx] = useState<number | null>(null);
+
+  const synthesizeTtsMutation = trpc.chat.synthesizeAssistantTts.useMutation({
+    onError: (error) => {
+      toast.error("语音合成失败: " + error.message);
+      setSynthTargetIdx(null);
+    },
+  });
+
+  const handleSynthesizeAssistantTts = (idx: number, content: string) => {
+    setSynthTargetIdx(idx);
+    synthesizeTtsMutation.mutate(
+      { text: content, sessionId: currentSessionId ?? undefined },
+      {
+        onSuccess: (data) => {
+          setMessages((prev) =>
+            prev.map((m, i) => (i === idx ? { ...m, tts: data.tts } : m))
+          );
+        },
+        onSettled: () => setSynthTargetIdx(null),
+      }
+    );
+  };
 
   const sendMessageMutation = trpc.chat.sendMessage.useMutation({
     onSuccess: (data) => {
@@ -314,6 +337,10 @@ export default function Cockpit() {
           isPending={sendMessageMutation.isPending}
           characterId={characterId}
           onCharacterChange={setCharacterId}
+          onSynthesizeAssistantTts={handleSynthesizeAssistantTts}
+          synthesizingMessageIndex={
+            synthesizeTtsMutation.isPending ? synthTargetIdx : null
+          }
         />
       </div>
 

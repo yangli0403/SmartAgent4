@@ -50,6 +50,36 @@ export interface ParsedEmotionTag {
   [key: string]: string | undefined;
 }
 
+/** 用于去重比较的 tags 稳定序列化 */
+function stableTagKey(tags: ParsedEmotionTag): string {
+  return Object.keys(tags)
+    .sort()
+    .map((k) => `${k}=${tags[k] ?? ""}`)
+    .join("&");
+}
+
+/**
+ * 解析器在部分多标签文案下会连续产出「同文案 + 同 tags」的重复段，导致同一段被 TTS 两次、播放器时长一致。
+ * 仅合并**相邻且完全相同**的段，保留真实多段不同文案。
+ */
+export function dedupeConsecutiveParsedSegments(
+  segments: Array<{ text: string; tags: ParsedEmotionTag }>
+): Array<{ text: string; tags: ParsedEmotionTag }> {
+  const out: Array<{ text: string; tags: ParsedEmotionTag }> = [];
+  for (const seg of segments) {
+    const t = seg.text.trim();
+    if (!t) continue;
+    const key = `${t}\x00${stableTagKey(seg.tags)}`;
+    const prev = out[out.length - 1];
+    if (prev) {
+      const pk = `${prev.text.trim()}\x00${stableTagKey(prev.tags)}`;
+      if (pk === key) continue;
+    }
+    out.push({ text: t, tags: { ...seg.tags } });
+  }
+  return out;
+}
+
 /**
  * 解析文本中的复合情感标签
  *
@@ -127,9 +157,10 @@ export function parseEmotionTags(text: string): {
     }
   }
 
-  const cleanText = segments.map((s) => s.text).join(" ");
+  const segmentsDeduped = dedupeConsecutiveParsedSegments(segments);
+  const cleanText = segmentsDeduped.map((s) => s.text).join(" ");
 
-  return { cleanText, tags: firstTags, segments };
+  return { cleanText, tags: firstTags, segments: segmentsDeduped };
 }
 
 // ==================== TTS 请求/响应 ====================
@@ -153,6 +184,8 @@ export class EmotionsSystemClient {
   private _available: boolean | null = null;
   private _lastHealthCheck: number = 0;
   private readonly HEALTH_CHECK_INTERVAL = 60000;
+  /** 最近一次 synthesize 全部重试失败时的错误信息（供 chat TTS 展示） */
+  private _lastSynthesizeError: string | null = null;
 
   constructor(config?: Partial<EmotionsClientConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -205,7 +238,13 @@ export class EmotionsSystemClient {
   /**
    * 调用 Emotions-System 的 TTS 接口合成语音
    */
+  /** 供 chat 侧在无音频时展示上游（如 CosyVoice）错误摘要 */
+  getLastSynthesizeError(): string | null {
+    return this._lastSynthesizeError;
+  }
+
   async synthesize(request: TTSRequest): Promise<TTSResponse | null> {
+    this._lastSynthesizeError = null;
     for (let attempt = 0; attempt <= this.config.retryCount; attempt++) {
       try {
         const controller = new AbortController();
@@ -214,17 +253,25 @@ export class EmotionsSystemClient {
           this.config.timeout
         );
 
+        const form = new FormData();
+        form.set("text", request.text);
+        const emotion = request.emotion || "neutral";
+        const instruction = request.instruction || "";
+        form.set(
+          "emotion_instruction",
+          [instruction, emotion !== "neutral" ? `emotion:${emotion}` : ""]
+            .filter(Boolean)
+            .join(" | ")
+        );
+        if (request.voiceId && request.voiceId !== "default") {
+          form.set("voice_id", request.voiceId);
+        }
+
         const response = await fetch(
           `${this.config.baseUrl}/api/tts/synthesize`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              text: request.text,
-              emotion: request.emotion || "neutral",
-              instruction: request.instruction || "",
-              voice_id: request.voiceId || "default",
-            }),
+            body: form,
             signal: controller.signal,
           }
         );
@@ -235,14 +282,32 @@ export class EmotionsSystemClient {
           throw new Error(`HTTP ${response.status}: ${await response.text()}`);
         }
 
-        const data = await response.json();
-        return {
-          audioBase64: data.audio_base64 || data.audioBase64 || "",
-          format: data.format || "wav",
-        };
+        const ct = response.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          const data = (await response.json()) as Record<string, unknown>;
+          const b64 = String(data.audio_base64 || data.audioBase64 || "");
+          if (!b64.trim()) {
+            throw new Error("TTS JSON response missing audio_base64");
+          }
+          return {
+            audioBase64: b64,
+            format: String(data.format || "wav"),
+          };
+        }
+
+        const buf = await response.arrayBuffer();
+        if (buf.byteLength < 64) {
+          throw new Error(
+            `TTS returned audio too small (${buf.byteLength} bytes), likely empty or invalid`
+          );
+        }
+        const audioBase64 = Buffer.from(buf).toString("base64");
+        return { audioBase64, format: "wav" };
       } catch (error) {
+        const msg = (error as Error).message;
+        this._lastSynthesizeError = msg;
         console.warn(
-          `[EmotionsSystemClient] Synthesize attempt ${attempt + 1} failed: ${(error as Error).message}`
+          `[EmotionsSystemClient] Synthesize attempt ${attempt + 1} failed: ${msg}`
         );
         if (attempt < this.config.retryCount) {
           await this.sleep(this.config.retryDelay * (attempt + 1));
@@ -262,6 +327,7 @@ export class EmotionsSystemClient {
     text: string,
     _sessionId: string
   ): Promise<MultimodalSegment[]> {
+    this._lastSynthesizeError = null;
     const available = await this.isAvailable();
     if (!available) {
       return this.createFallbackSegments(text);
@@ -269,9 +335,18 @@ export class EmotionsSystemClient {
 
     const { segments } = parseEmotionTags(text);
     const results: MultimodalSegment[] = [];
+    const gapMs = Math.max(
+      0,
+      parseInt(process.env.EMOTIONS_TTS_SEGMENT_GAP_MS || "120", 10) || 0
+    );
 
-    for (const segment of segments) {
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
       const emotion = this.normalizeEmotion(segment.tags.emotion);
+
+      if (i > 0 && gapMs > 0) {
+        await this.sleep(gapMs);
+      }
 
       // 调用 TTS
       const ttsResult = await this.synthesize({

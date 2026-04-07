@@ -493,10 +493,65 @@ export async function getUserProfileSnapshot(userId: number): Promise<Contextual
   }
 }
 
-export async function getFormattedMemoryContext(userId: number, query: string, maxLength: number = 2000): Promise<string> {
+/** 与姓名/身份相关的问法，需放宽检索（整句无法 ILIKE 匹配「用户名为李华」类正文） */
+const NAME_OR_IDENTITY_QUERY_RE =
+  /(?:姓名|名字|大名|称呼|我是谁|我叫什么|叫什么|猜我|我的名|哪国人)/u;
+
+/**
+ * 为对话注入格式化的长期记忆上下文。
+ *
+ * 注意：不能用「整句用户话」做唯一子串匹配——例如「你猜我叫什么」无法匹配任何一条记忆正文，
+ * 会导致检索为空、模型看不到已存储的姓名。优先混合检索，并在问身份/姓名为空时补充重要记忆。
+ */
+export async function getFormattedMemoryContext(
+  userId: number,
+  query: string,
+  maxLength: number = 2000
+): Promise<string> {
   try {
-    const relevantMemories = await searchMemories({ userId, query, limit: 15, minImportance: 0.3 });
-    return formatMemoriesForContext(relevantMemories, maxLength);
+    const q = query.trim();
+    const seen = new Set<number>();
+    const merged: Memory[] = [];
+
+    const pushUnique = (rows: Memory[]) => {
+      for (const m of rows) {
+        if (!seen.has(m.id)) {
+          seen.add(m.id);
+          merged.push(m);
+        }
+      }
+    };
+
+    // 1) 混合检索：整句不作为子串匹配，BM25 按词相关性排序
+    if (q.length > 0) {
+      const hybrid = await searchMemories({
+        userId,
+        query: q,
+        limit: 15,
+        minImportance: 0.25,
+        useHybridSearch: true,
+      });
+      pushUnique(hybrid);
+    }
+
+    // 2) 混合仍为空，或明显在问姓名/身份：补充按重要度拉取（不依赖问句出现在正文中）
+    if (
+      merged.length === 0 ||
+      (q.length > 0 && NAME_OR_IDENTITY_QUERY_RE.test(q))
+    ) {
+      const broad = await searchMemories({
+        userId,
+        limit: 25,
+        minImportance: 0.2,
+      });
+      pushUnique(broad);
+    }
+
+    merged.sort(
+      (a, b) => Number(b.importance ?? 0) - Number(a.importance ?? 0)
+    );
+
+    return formatMemoriesForContext(merged.slice(0, 25), maxLength);
   } catch (error) {
     console.error("[Memory] Error getting memory context:", error);
     return "";

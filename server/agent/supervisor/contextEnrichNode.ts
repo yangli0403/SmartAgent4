@@ -28,6 +28,10 @@ import {
 } from "../../emotions/emotionTagInstructions";
 import { getEmotionsClient } from "../../emotions/emotionsClient";
 import { getPrefetchCache } from "../../memory/prefetchCache";
+import {
+  extractDialogueSlotsFromMessages,
+  mergeDialogueSlotsWithLocationCity,
+} from "./dialogueSlots";
 
 /**
  * 上下文增强节点
@@ -56,7 +60,12 @@ export async function contextEnrichNode(
 
   if (!userId) {
     console.warn("[ContextEnrichNode] No userId available, skipping enrichment");
-    return {};
+    const extractedSlots = extractDialogueSlotsFromMessages(messages);
+    const dialogueSlots = mergeDialogueSlotsWithLocationCity(
+      extractedSlots,
+      context?.location?.city
+    );
+    return dialogueSlots ? { dialogueSlots } : {};
   }
 
   // === 判断是否为新建会话 ===
@@ -146,9 +155,16 @@ export async function contextEnrichNode(
       memoryContext: "",
     });
 
+    const extractedSlots = extractDialogueSlotsFromMessages(messages);
+    const dialogueSlots = mergeDialogueSlotsWithLocationCity(
+      extractedSlots,
+      context?.location?.city
+    );
+
     return {
       dynamicSystemPrompt: fallbackPrompt,
       retrievedMemories: [],
+      dialogueSlots,
     };
   }
 }

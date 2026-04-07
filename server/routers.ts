@@ -45,6 +45,7 @@ import {
   type PersonalityType,
 } from "./personality/personalitySystem";
 import { getPersonalityEngine } from "./personality/personalityEngine";
+import { synthesizeReplyTts } from "./emotions/chatTtsHelper";
 import { getEmotionsClient } from "./emotions/emotionsClient";
 import { getUserProfileSnapshot } from "./memory/memorySystem";
 import type { User } from "../drizzle/schema";
@@ -157,7 +158,12 @@ export const appRouter = router({
                 userId: String(userId),
                 sessionId: String(sessionId ?? userId),
                 conversationHistory,
-                platform: "linux",
+                platform:
+                  process.platform === "win32"
+                    ? "windows"
+                    : process.platform === "darwin"
+                      ? "mac"
+                      : "linux",
                 characterId: input.characterId || "xiaozhi",
               }
             );
@@ -216,7 +222,11 @@ export const appRouter = router({
         // ===== AIRI Bridge 集成：将回复转发到 AIRI =====
         if (airiBridge && airiBridge.getStatus().status === "ready") {
           try {
-            await airiBridge.sendResponse(responseText, undefined, String(sessionId ?? userId));
+            await airiBridge.sendResponse(
+              responseText,
+              undefined,
+              String(sessionId ?? userId)
+            );
             console.log("[Chat] Response forwarded to AIRI Bridge");
           } catch (bridgeErr) {
             console.warn(`[Chat] AIRI Bridge forward failed: ${(bridgeErr as Error).message}`);
@@ -229,6 +239,21 @@ export const appRouter = router({
           personality,
           persisted,
         };
+      }),
+
+    /** 用户点击「生成语音」后单独合成，避免阻塞首包文字回复 */
+    synthesizeAssistantTts: protectedProcedure
+      .input(
+        z.object({
+          text: z.string().min(1),
+          sessionId: z.number().nullable().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const user = await ensureUser(ctx);
+        const sessionKey = String(input.sessionId ?? user.id);
+        const { payload } = await synthesizeReplyTts(input.text, sessionKey);
+        return { tts: payload };
       }),
 
     getHistory: protectedProcedure

@@ -150,6 +150,22 @@ export interface UserContext {
   responseStyle: string;
 }
 
+/**
+ * 多轮对话结构化槽位（启发式抽取，与最近对话摘要互补）
+ *
+ * 由 dialogueSlots 模块从用户消息全量文本抽取，每轮在 contextEnrich 节点更新。
+ */
+export interface DialogueSlots {
+  /** 城市或区域线索（用于约束 POI / 天气等） */
+  regionHint?: string;
+  /** 导航起点描述 */
+  navOrigin?: string;
+  /** 导航终点描述 */
+  navDestination?: string;
+  /** 途经点 / 兴趣点（自然语言） */
+  navWaypoints?: string[];
+}
+
 // ==================== Supervisor 图状态 ====================
 
 /**
@@ -228,6 +244,14 @@ export const SupervisorState = Annotation.Root({
   characterId: Annotation<string>({
     reducer: (_existing, incoming) => incoming,
     default: () => "xiaozhi",
+  }),
+
+  /**
+   * 会话槽位（城市/起终点/途经点等），供 Domain Agent 与对话摘要一起使用
+   */
+  dialogueSlots: Annotation<DialogueSlots | undefined>({
+    reducer: (_existing, incoming) => incoming,
+    default: () => undefined,
   }),
 });
 

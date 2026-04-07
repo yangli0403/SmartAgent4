@@ -14,19 +14,19 @@ import {
   type EmotionTag,
 } from "@/lib/emotionParser";
 import { Streamdown } from "streamdown";
+import type { ChatUiMessage } from "@shared/chatTts";
+import { TtsPlayback } from "@/components/TtsPlayback";
 
 // ==================== 类型 ====================
 
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-}
-
 interface AssistantPanelProps {
-  messages: Message[];
+  messages: ChatUiMessage[];
   isPending: boolean;
   characterId?: string;
   onCharacterChange?: (id: string) => void;
+  /** 传入后助手消息显示「生成语音」，点击再调 TTS（不阻塞文字） */
+  onSynthesizeAssistantTts?: (messageIndex: number, content: string) => void;
+  synthesizingMessageIndex?: number | null;
 }
 
 // 人格选项配置
@@ -156,7 +156,19 @@ function EmotionDisplay({ parsed }: { parsed: ParsedMessage }) {
 
 // ==================== 单条消息组件 ====================
 
-function AssistantMessage({ content }: { content: string }) {
+function AssistantMessage({
+  content,
+  tts,
+  lazyTts,
+  onSynthesize,
+  isSynthesizing,
+}: {
+  content: string;
+  tts?: ChatUiMessage["tts"];
+  lazyTts?: boolean;
+  onSynthesize?: () => void;
+  isSynthesizing?: boolean;
+}) {
   const parsed = parseEmotionTags(content);
   const bgClass = getEmotionBgClass(parsed.primaryEmotion?.label || null);
 
@@ -171,6 +183,15 @@ function AssistantMessage({ content }: { content: string }) {
 
       {/* 情感标签可视化 */}
       <EmotionDisplay parsed={parsed} />
+
+      {(lazyTts || tts) && (
+        <TtsPlayback
+          tts={tts}
+          lazy={Boolean(lazyTts && !tts)}
+          onSynthesize={onSynthesize}
+          isSynthesizing={isSynthesizing}
+        />
+      )}
     </div>
   );
 }
@@ -189,7 +210,7 @@ function LoadingDots() {
   return (
     <div className="rounded-xl p-3 bg-white border border-gray-200">
       <div className="flex gap-1 items-center">
-        <span className="text-xs text-gray-400 mr-2">思考中</span>
+        <span className="text-xs text-gray-400 mr-2">正在生成回复…</span>
         {[0, 150, 300].map((d) => (
           <div
             key={d}
@@ -209,6 +230,8 @@ export default function AssistantPanel({
   isPending,
   characterId = "xiaozhi",
   onCharacterChange,
+  onSynthesizeAssistantTts,
+  synthesizingMessageIndex = null,
 }: AssistantPanelProps) {
   // 只取最近的消息用于展示
   const recentMessages = messages.slice(-20);
@@ -257,7 +280,17 @@ export default function AssistantPanel({
             >
               <div className={`max-w-[95%] ${msg.role === "user" ? "max-w-[80%]" : ""}`}>
                 {msg.role === "assistant" ? (
-                  <AssistantMessage content={msg.content} />
+                  <AssistantMessage
+                    content={msg.content}
+                    tts={msg.tts}
+                    lazyTts={Boolean(onSynthesizeAssistantTts)}
+                    onSynthesize={
+                      onSynthesizeAssistantTts
+                        ? () => onSynthesizeAssistantTts(idx, msg.content)
+                        : undefined
+                    }
+                    isSynthesizing={synthesizingMessageIndex === idx}
+                  />
                 ) : (
                   <UserMessage content={msg.content} />
                 )}

@@ -16,6 +16,7 @@ import {
   getAgentCardRegistry,
   DynamicPromptAssembler,
 } from "../discovery";
+import { appendGeneralAgentMemoryStepIfNeeded } from "./navigationMemoryPlan";
 
 /**
  * planNode 的 LLM 系统提示词（静态降级版本）
@@ -158,6 +159,8 @@ export async function planNode(
       step.dependsOn = step.dependsOn || [];
       step.inputMapping = step.inputMapping || {};
     }
+
+    plan.steps = appendGeneralAgentMemoryStepIfNeeded(state, plan.steps);
 
     console.log(
       `[PlanNode] Plan generated: ${plan.steps.length} steps for goal "${plan.goal}"`

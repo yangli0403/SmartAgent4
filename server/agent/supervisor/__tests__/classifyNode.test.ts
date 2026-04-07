@@ -9,6 +9,9 @@ import {
   routeByComplexity,
   CLASSIFY_SYSTEM_PROMPT,
   resolveAgentsForDomain,
+  refineClassificationForDiskIntent,
+  userMessageLooksLikeDirectoryInventoryIntent,
+  refineClassificationForDirectoryInventoryIntent,
 } from "../classifyNode";
 import { AgentCardRegistry } from "../../discovery/agentCardRegistry";
 import type { AgentCard } from "../../discovery/types";
@@ -29,6 +32,10 @@ function createMockState(
     stepResults: overrides.stepResults || [],
     finalResponse: overrides.finalResponse || "",
     context: overrides.context || null,
+    dynamicSystemPrompt: overrides.dynamicSystemPrompt ?? "",
+    retrievedMemories: overrides.retrievedMemories ?? [],
+    characterId: overrides.characterId ?? "xiaozhi",
+    dialogueSlots: overrides.dialogueSlots,
   };
 }
 
@@ -152,6 +159,56 @@ describe("ClassifyNode", () => {
     it("无 Card 时 file_system 应回退到 fileAgent", () => {
       const r = new AgentCardRegistry();
       expect(resolveAgentsForDomain("file_system", r)).toEqual(["fileAgent"]);
+    });
+  });
+
+  describe("refineClassificationForDiskIntent", () => {
+    it("「分析 C 盘」从 general 应纠偏为 file_system + fileAgent", () => {
+      const c = {
+        domain: "general" as const,
+        complexity: "simple" as const,
+        reasoning: "test",
+        requiredAgents: ["generalAgent"],
+      };
+      refineClassificationForDiskIntent("帮我分析一下我C盘的情况", c);
+      expect(c.domain).toBe("file_system");
+      expect(c.requiredAgents).toEqual(["fileAgent"]);
+    });
+
+    it("已是 fileAgent 时不应覆盖", () => {
+      const c = {
+        domain: "file_system" as const,
+        complexity: "simple" as const,
+        reasoning: "",
+        requiredAgents: ["fileAgent"],
+      };
+      refineClassificationForDiskIntent("看看C盘空间", c);
+      expect(c.requiredAgents).toEqual(["fileAgent"]);
+    });
+  });
+
+  describe("目录文件占比 / refineClassificationForDirectoryInventoryIntent", () => {
+    it("应识别「下载目录 + 文件占比」", () => {
+      expect(
+        userMessageLooksLikeDirectoryInventoryIntent(
+          "帮我分析一下下载目录的文件占比"
+        )
+      ).toBe(true);
+    });
+
+    it("从 general 应纠偏为 file_system + fileAgent", () => {
+      const c = {
+        domain: "general" as const,
+        complexity: "simple" as const,
+        reasoning: "test",
+        requiredAgents: ["generalAgent"],
+      };
+      refineClassificationForDirectoryInventoryIntent(
+        "帮我分析一下下载目录的文件占比",
+        c
+      );
+      expect(c.domain).toBe("file_system");
+      expect(c.requiredAgents).toEqual(["fileAgent"]);
     });
   });
 });

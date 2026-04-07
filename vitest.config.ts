@@ -5,7 +5,11 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["tests/**/*.test.ts", "server/**/__tests__/**/*.test.ts"],
+    include: [
+      "tests/**/*.test.ts",
+      "server/**/__tests__/**/*.test.ts",
+      "server/chat.test.ts",
+    ],
     coverage: {
       provider: "v8",
       include: [

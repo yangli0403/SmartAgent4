@@ -14,6 +14,7 @@ import type { SupervisorStateType } from "./state";
 import { callLLMText } from "../../llm/langchainAdapter";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import { getUserProfileSnapshot } from "../../memory/memorySystem";
+import { persistNavigationEpisodicIfNeeded } from "./persistNavigationEpisodic";
 
 /**
  * respondNode 的基础 LLM 系统提示词
@@ -54,6 +55,15 @@ export async function respondNode(
     characterId,
     taskClassification,
   } = state;
+
+  try {
+    await persistNavigationEpisodicIfNeeded(state);
+  } catch (e) {
+    console.warn(
+      "[RespondNode] persistNavigationEpisodicIfNeeded:",
+      (e as Error).message
+    );
+  }
 
   // 如果 replanNode 已经生成了 finalResponse（complete/abort），直接使用
   if (finalResponse && finalResponse.length > 0) {

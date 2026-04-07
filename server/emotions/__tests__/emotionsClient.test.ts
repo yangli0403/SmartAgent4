@@ -5,7 +5,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseEmotionTags, EmotionsSystemClient } from "../emotionsClient";
+import {
+  parseEmotionTags,
+  EmotionsSystemClient,
+  dedupeConsecutiveParsedSegments,
+} from "../emotionsClient";
 
 // ==================== 标签解析测试 ====================
 
@@ -55,6 +59,29 @@ describe("parseEmotionTags", () => {
 
     expect(result.tags.emotion).toBe("angry");
     expect(result.tags.instruction).toBe("用愤怒的语气说话");
+  });
+
+  it("多标签相邻重复段应去重，避免同句两次 TTS", () => {
+    const result = parseEmotionTags(
+      "[emotion:happy]片段1 [emotion:sad]片段2"
+    );
+    expect(result.segments.length).toBe(2);
+    const texts = result.segments.map((s) => s.text);
+    expect(texts.filter((t) => t === "片段1").length).toBe(1);
+  });
+});
+
+describe("dedupeConsecutiveParsedSegments", () => {
+  it("合并相邻完全相同的段", () => {
+    const raw = [
+      { text: "同句", tags: { emotion: "neutral" } },
+      { text: "同句", tags: { emotion: "neutral" } },
+      { text: "下一句", tags: { emotion: "happy" } },
+    ];
+    const d = dedupeConsecutiveParsedSegments(raw);
+    expect(d).toHaveLength(2);
+    expect(d[0].text).toBe("同句");
+    expect(d[1].text).toBe("下一句");
   });
 });
 

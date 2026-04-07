@@ -26,7 +26,8 @@ export function createExecuteNode(agentRegistry: AgentRegistry) {
   return async function executeNode(
     state: SupervisorStateType
   ): Promise<Partial<SupervisorStateType>> {
-    const { plan, currentStepIndex, stepResults, messages, context } = state;
+    const { plan, currentStepIndex, stepResults, messages, context, dialogueSlots } =
+      state;
 
     // 1. 获取当前步骤
     if (currentStepIndex >= plan.length) {
@@ -76,24 +77,27 @@ export function createExecuteNode(agentRegistry: AgentRegistry) {
         : JSON.stringify(lastUserMessage?.content || "");
 
     // 5. 构建 Agent 执行输入
+    const ctxPayload = {
+      ...(context && {
+        userId: context.userId,
+        location: context.location
+          ? {
+              latitude: context.location.latitude,
+              longitude: context.location.longitude,
+              city: context.location.city,
+            }
+          : undefined,
+        currentTime: context.currentTime,
+      }),
+      ...(dialogueSlots ? { dialogueSlots } : {}),
+    };
     const executionInput: AgentExecutionInput = {
       step: currentStep,
       userMessage: userText,
       resolvedInputs,
       conversationHistory: messages,
-      context: context
-        ? {
-            userId: context.userId,
-            location: context.location
-              ? {
-                  latitude: context.location.latitude,
-                  longitude: context.location.longitude,
-                  city: context.location.city,
-                }
-              : undefined,
-            currentTime: context.currentTime,
-          }
-        : undefined,
+      context:
+        Object.keys(ctxPayload).length > 0 ? ctxPayload : undefined,
     };
 
     // 6. 执行 Domain Agent

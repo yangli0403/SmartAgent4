@@ -21,11 +21,27 @@ import {
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
+/** 与真实 fetch 一致：含 headers，否则 synthesize 读 Content-Type 会报错 */
+function mockJsonTtsResponse(payload: {
+  audio_base64: string;
+  format: string;
+}) {
+  return {
+    ok: true,
+    headers: {
+      get: (name: string) =>
+        name.toLowerCase() === "content-type" ? "application/json" : null,
+    },
+    json: async () => payload,
+  };
+}
+
 describe("EmotionsExpressClient", () => {
   let client: EmotionsExpressClient;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFetch.mockReset();
     client = new EmotionsExpressClient({
       baseUrl: "http://localhost:8000",
       timeout: 5000,
@@ -99,13 +115,9 @@ describe("EmotionsExpressClient", () => {
       // 健康检查
       mockFetch.mockResolvedValueOnce({ ok: true });
       // TTS synthesize 请求 — render() 内部对每个 segment 调用 synthesize()
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          audio_base64: "base64data",
-          format: "mp3",
-        }),
-      });
+      mockFetch.mockResolvedValueOnce(
+        mockJsonTtsResponse({ audio_base64: "base64data", format: "mp3" })
+      );
 
       // 使用带情感标签的文本，这样 normalizeEmotion 能识别出 happy
       const result = await client.render(
@@ -126,13 +138,9 @@ describe("EmotionsExpressClient", () => {
       // 健康检查
       mockFetch.mockResolvedValueOnce({ ok: true });
       // TTS synthesize 请求
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          audio_base64: "audiodata",
-          format: "wav",
-        }),
-      });
+      mockFetch.mockResolvedValueOnce(
+        mockJsonTtsResponse({ audio_base64: "audiodata", format: "wav" })
+      );
 
       const result = await client.render("你好！", "session-1");
 
@@ -175,29 +183,31 @@ describe("EmotionsExpressClient", () => {
     });
 
     it("应正确处理多段情感标签文本", async () => {
-      // 健康检查
+      // 去重后 2 个 segment；retryCount=0 时 fetch = 1 health + 2 TTS
+      const noRetryClient = new EmotionsExpressClient({
+        baseUrl: "http://localhost:8000",
+        timeout: 5000,
+        enabled: true,
+        retryCount: 0,
+        retryDelay: 100,
+      });
       mockFetch.mockResolvedValueOnce({ ok: true });
-      // 第一段 TTS
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ audio_base64: "audio1", format: "wav" }),
-      });
-      // 第二段 TTS
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ audio_base64: "audio2", format: "wav" }),
-      });
+      mockFetch.mockResolvedValueOnce(
+        mockJsonTtsResponse({ audio_base64: "audio1", format: "wav" })
+      );
+      mockFetch.mockResolvedValueOnce(
+        mockJsonTtsResponse({ audio_base64: "audio2", format: "wav" })
+      );
 
       // 两段标签文本：[emotion:happy]片段1 [emotion:sad]片段2
-      const result = await client.render(
+      const result = await noRetryClient.render(
         "[emotion:happy]片段1 [emotion:sad]片段2",
         "session-1"
       );
 
-      // parseEmotionTags 会将其拆分为两个 segment
-      expect(result.length).toBeGreaterThanOrEqual(1);
-      // 第一段应该包含 "片段1"
+      expect(result.length).toBe(2);
       expect(result[0].text).toContain("片段1");
+      expect(result[1].text).toContain("片段2");
     });
   });
 
@@ -285,10 +295,9 @@ describe("EmotionsExpressClient", () => {
       // 健康检查
       mockFetch.mockResolvedValueOnce({ ok: true });
       // TTS synthesize
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ audio_base64: "data", format: "wav" }),
-      });
+      mockFetch.mockResolvedValueOnce(
+        mockJsonTtsResponse({ audio_base64: "data", format: "wav" })
+      );
 
       // 使用带 emotion 标签的文本，normalizeEmotion 才能识别
       const result = await client.render("[emotion:happy]test", "s1");
@@ -299,10 +308,9 @@ describe("EmotionsExpressClient", () => {
       // 健康检查
       mockFetch.mockResolvedValueOnce({ ok: true });
       // TTS synthesize
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ audio_base64: "data", format: "wav" }),
-      });
+      mockFetch.mockResolvedValueOnce(
+        mockJsonTtsResponse({ audio_base64: "data", format: "wav" })
+      );
 
       // 使用无效 emotion 标签
       const result = await client.render(

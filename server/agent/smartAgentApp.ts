@@ -29,6 +29,7 @@ import {
   type SupervisorInput,
   type SupervisorOutput,
 } from "./supervisor";
+import { userMessageLooksLikeDiskIntent } from "./supervisor/classifyNode";
 import {
   getAgentCardRegistry,
   type IAgentCardRegistry,
@@ -289,9 +290,17 @@ export class SmartAgentApp {
       options.sessionId
     );
 
+    // 磁盘/C 盘类问题：在消息末尾附加系统指令，强制模型先走 get_disk_health，避免只输出泛泛的「手动教程」
+    let userMessageForSupervisor = userMessage;
+    if (userMessageLooksLikeDiskIntent(userMessage)) {
+      userMessageForSupervisor =
+        userMessage +
+        "\n\n[系统指令] 你必须先调用 get_disk_health 工具（参数 driveLetter 默认 C），将返回的已用/剩余空间、health 等写入回复；若用户还关心可清理垃圾体量，再调用 scan_system_junk。禁止仅用「打开磁盘属性、运行磁盘清理」等通用手动教程作为主要回答，工具结果须优先呈现。";
+    }
+
     // 构建 Supervisor 输入
     const input: SupervisorInput = {
-      userMessage,
+      userMessage: userMessageForSupervisor,
       conversationHistory: options.conversationHistory,
       context: {
         userId: options.userId,

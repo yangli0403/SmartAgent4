@@ -5,3 +5,9 @@
 
 export type * from "../drizzle/schema";
 export * from "./_core/errors";
+export type {
+  ChatTtsPayload,
+  ChatTtsSegmentDTO,
+  ChatTtsStatus,
+  ChatUiMessage,
+} from "./chatTts";
