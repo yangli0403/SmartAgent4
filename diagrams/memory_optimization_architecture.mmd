@@ -1,0 +1,69 @@
+graph TD
+    subgraph 用户交互层
+        A[用户消息]
+    end
+
+    subgraph 前台检索链路
+        B[contextEnrichNode]
+        B1[PrefetchCache 检查]
+        B2["Pre-Retrieval Decision<br/>(规则 + nano LLM)"]
+        B3["Query Rewrite<br/>(查询重写)"]
+        B4["getFormattedMemoryContext<br/>(useHybridSearch: true)"]
+    end
+
+    subgraph 混合检索引擎
+        C1["BM25 文本检索"]
+        C2["向量余弦相似度检索"]
+        C3["双路结果融合<br/>(alpha 加权)"]
+    end
+
+    subgraph 记忆写入链路
+        D1["Agent memory_store<br/>(主动记忆)"]
+        D2["提取审计层<br/>(置信度门控 + 去重)"]
+        D3["addMemory<br/>(含 Embedding 生成)"]
+        D4["Confidence 动态演化"]
+    end
+
+    subgraph 后台服务
+        E1["memoryExtractionNode<br/>(工作记忆更新)"]
+        E2["行为模式检测<br/>(独立事件驱动)"]
+        E3["DreamGatekeeper<br/>(做梦触发)"]
+        E4["补漏提取<br/>(批量回溯)"]
+        E5[consolidationService]
+        E6[forgettingService]
+    end
+
+    subgraph 数据存储层
+        F1[(memories 表<br/>含 embedding 字段)]
+        F2[(behavior_patterns 表)]
+        F3[(memory_clusters 表)]
+    end
+
+    A --> B
+    B --> B1
+    B1 -->|命中| B4
+    B1 -->|未命中| B2
+    B2 -->|NO_RETRIEVE| G[跳过检索]
+    B2 -->|RETRIEVE| B3
+    B3 --> B4
+    B4 --> C1
+    B4 --> C2
+    C1 --> C3
+    C2 --> C3
+    C3 --> B
+
+    D1 --> D2
+    D2 -->|通过| D3
+    D2 -->|拦截| D1
+    D3 --> D4
+    D3 --> F1
+    D4 --> F1
+
+    E1 --> E2
+    E2 --> F2
+    E3 --> E4
+    E4 --> D3
+    E5 --> F3
+    E6 --> F1
+
+    C2 -.->|读取 embedding| F1
