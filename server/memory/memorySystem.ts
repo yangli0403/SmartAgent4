@@ -22,6 +22,8 @@ import type { ContextualProfileSnapshot } from "../personality/types";
 import { hybridSearch, reflectOnMemories, type HybridSearchResult } from "./hybridSearch";
 import { consolidateMemories as smartMemConsolidate } from "./consolidationService";
 import { applyForgettingDecay } from "./forgettingService";
+import { generateEmbedding } from "./embeddingService";
+import { evolveConfidence } from "./confidenceEvolution";
 
 // ==================== 类型定义 ====================
 
@@ -177,22 +179,83 @@ export async function getDisplayNameFromPersona(userId: number): Promise<string 
 
 /**
  * 添加记忆 — PostgreSQL 版（使用 .returning()）
+ *
+ * 增强功能（记忆优化迭代）：
+ * 1. 写入前生成 Embedding 向量（异步，失败不阻塞）
+ * 2. 有 versionGroup 时执行 Confidence 演化
  */
 export async function addMemory(memory: InsertMemory): Promise<Memory | null> {
   const db = await getDb();
   if (!db) { console.warn("[Memory] addMemory: DB not available"); return null; }
 
   try {
+    // --- 新增：生成 Embedding 向量 ---
+    if (memory.content && !memory.embedding) {
+      const embedding = await generateEmbedding(memory.content);
+      if (embedding) {
+        memory = { ...memory, embedding };
+        console.log(`[Memory] Embedding generated: dim=${embedding.length}`);
+      }
+    }
+
+    // --- 新增：Confidence 演化 ---
     if (memory.versionGroup) {
-      const existing = await searchMemories({ userId: memory.userId, versionGroup: memory.versionGroup, limit: 1 });
+      const existing = await searchMemories({
+        userId: memory.userId,
+        versionGroup: memory.versionGroup,
+        limit: 10,
+      });
+
       if (existing.length > 0) {
-        await db.update(memories).set({
-          content: memory.content, importance: memory.importance, confidence: memory.confidence,
-          tags: memory.tags, metadata: memory.metadata,
-        }).where(eq(memories.id, existing[0].id));
-        console.log(`[Memory] Updated (versionGroup=${memory.versionGroup}): id=${existing[0].id}`);
-        const updated = await db.select().from(memories).where(eq(memories.id, existing[0].id)).limit(1);
-        return updated[0] || null;
+        const evolution = await evolveConfidence(
+          {
+            content: memory.content,
+            kind: memory.kind,
+            versionGroup: memory.versionGroup,
+            userId: memory.userId,
+          },
+          existing
+        );
+
+        if (evolution.action === "BOOST") {
+          // 内容一致：提升已有记忆置信度，跳过写入
+          const targetId = evolution.affectedMemory!.id;
+          await db.update(memories).set({
+            confidence: evolution.newConfidence,
+            accessCount: (evolution.affectedMemory!.accessCount ?? 0) + 1,
+            lastAccessedAt: new Date(),
+          }).where(eq(memories.id, targetId));
+          console.log(
+            `[Memory] BOOST: id=${targetId}, confidence=${evolution.previousConfidence} → ${evolution.newConfidence}`
+          );
+          const updated = await db.select().from(memories).where(eq(memories.id, targetId)).limit(1);
+          return updated[0] || null;
+        }
+
+        if (evolution.action === "SUPERSEDE") {
+          // 内容矛盾：降低已有记忆置信度，继续写入新记忆
+          const targetId = evolution.affectedMemory!.id;
+          await db.update(memories).set({
+            confidence: evolution.newConfidence,
+          }).where(eq(memories.id, targetId));
+          console.log(
+            `[Memory] SUPERSEDE: old id=${targetId}, confidence=${evolution.previousConfidence} → ${evolution.newConfidence}`
+          );
+          // 继续执行下方的 insert 逻辑
+        }
+
+        if (evolution.action === "SKIP" || evolution.action === "NO_MATCH") {
+          // 人格记忆或无匹配：保留原有 versionGroup 更新逻辑
+          if (existing.length > 0 && evolution.action !== "NO_MATCH") {
+            await db.update(memories).set({
+              content: memory.content, importance: memory.importance, confidence: memory.confidence,
+              tags: memory.tags, metadata: memory.metadata, embedding: memory.embedding,
+            }).where(eq(memories.id, existing[0].id));
+            console.log(`[Memory] Updated (versionGroup=${memory.versionGroup}): id=${existing[0].id}`);
+            const updated = await db.select().from(memories).where(eq(memories.id, existing[0].id)).limit(1);
+            return updated[0] || null;
+          }
+        }
       }
     }
 
@@ -506,8 +569,16 @@ const NAME_OR_IDENTITY_QUERY_RE =
 export async function getFormattedMemoryContext(
   userId: number,
   query: string,
+  queryEmbeddingOrMaxLength?: number[] | number | null,
   maxLength: number = 2000
 ): Promise<string> {
+  // 兼容旧调用方式：第三个参数可能是 maxLength（number）或 queryEmbedding（number[]）
+  let queryEmbedding: number[] | null = null;
+  if (Array.isArray(queryEmbeddingOrMaxLength)) {
+    queryEmbedding = queryEmbeddingOrMaxLength;
+  } else if (typeof queryEmbeddingOrMaxLength === "number") {
+    maxLength = queryEmbeddingOrMaxLength;
+  }
   try {
     const q = query.trim();
     const seen = new Set<number>();
@@ -530,6 +601,7 @@ export async function getFormattedMemoryContext(
         limit: 15,
         minImportance: 0.25,
         useHybridSearch: true,
+        queryEmbedding,
       });
       pushUnique(hybrid);
     }

@@ -153,10 +153,15 @@ export interface HybridSearchResult {
 }
 
 /**
- * 执行混合检索
+ * 执行混合检索（带优雅降级）
  *
  * 将 BM25 和向量检索的分数进行归一化后加权融合，
  * 返回按综合分数排序的结果。
+ *
+ * 优雅降级策略：
+ * - 有 queryEmbedding 且候选文档有 embedding：混合检索（BM25 + 向量）
+ * - 无 queryEmbedding 或候选文档无 embedding：纯 BM25 检索
+ * - 无查询词：按重要度排序返回
  */
 export function hybridSearch(
   options: HybridSearchOptions
@@ -170,6 +175,23 @@ export function hybridSearch(
 
   // 计算向量分数
   const vecScores = vectorScore(queryEmbedding || null, candidates);
+
+  // 检测向量检索是否可用（查询向量存在 且 至少有一个候选文档有有效向量分数）
+  const hasVectorScores = vecScores.size > 0 &&
+    Array.from(vecScores.values()).some((v) => v > 0);
+
+  // 动态调整权重：向量不可用时自动回退到纯 BM25
+  const effectiveAlpha = hasVectorScores ? alpha : 1.0;
+
+  if (!hasVectorScores && queryEmbedding) {
+    console.log(
+      "[HybridSearch] 向量检索降级：候选文档无有效 embedding，回退到纯 BM25 模式"
+    );
+  } else if (!queryEmbedding) {
+    console.log(
+      "[HybridSearch] 向量检索降级：无查询向量，回退到纯 BM25 模式"
+    );
+  }
 
   // 归一化函数
   const normalize = (scores: Map<number, number>): Map<number, number> => {
@@ -186,13 +208,13 @@ export function hybridSearch(
   };
 
   const normBm25 = normalize(bm25Scores);
-  const normVec = normalize(vecScores);
+  const normVec = hasVectorScores ? normalize(vecScores) : new Map<number, number>();
 
   // 加权融合
   const results: HybridSearchResult[] = candidates.map((memory) => {
     const b = normBm25.get(memory.id) || 0;
     const v = normVec.get(memory.id) || 0;
-    const combinedScore = alpha * b + (1 - alpha) * v;
+    const combinedScore = effectiveAlpha * b + (1 - effectiveAlpha) * v;
 
     return {
       memory,

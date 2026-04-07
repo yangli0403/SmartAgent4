@@ -111,11 +111,26 @@ export async function memoryExtractionNode(
     });
   }
 
+  // === 行为模式检测（解耦：始终执行，不依赖自动提取开关） ===
+  // 记忆优化迭代：行为检测从自动提取流程中解耦，独立运行
+  // 即使 Agent 使用 memory_store 主动存储，行为模式仍需要从对话中检测
+  detectAndPersistPatterns({
+    userId,
+    conversationHistory,
+    extractedMemories: [], // 解耦后不依赖提取结果，行为检测器直接分析对话
+    timestamp: new Date().toISOString(),
+  }).catch((err) => {
+    console.error(
+      "[MemoryExtractionNode] Behavior detection failed:",
+      (err as Error).message
+    );
+  });
+
   // === 自动提取记忆（受开关控制） ===
   if (!AUTO_EXTRACTION_ENABLED) {
     console.log(
       "[MemoryExtractionNode] Auto extraction disabled (skills-based memory mode). " +
-        "Working memory updated. Skipping LLM extraction pipeline."
+        "Working memory updated. Behavior detection triggered. Skipping LLM extraction pipeline."
     );
     return {};
   }
@@ -131,25 +146,6 @@ export async function memoryExtractionNode(
         console.log(
           `[MemoryExtractionNode] Extracted ${memories.length} new memories for user ${userId}`
         );
-
-        // === 第四轮迭代新增：异步触发行为模式检测（fire-and-forget） ===
-        detectAndPersistPatterns({
-          userId,
-          conversationHistory,
-          extractedMemories: memories.map((m) => ({
-            kind: m.kind,
-            type: m.type,
-            content: m.content,
-            importance: m.importance,
-            confidence: m.confidence,
-          })),
-          timestamp: new Date().toISOString(),
-        }).catch((err) => {
-          console.error(
-            "[MemoryExtractionNode] Behavior detection failed:",
-            (err as Error).message
-          );
-        });
       }
     })
     .catch((error) => {

@@ -12,6 +12,7 @@
  */
 
 import type { Memory } from "../../drizzle/schema";
+import { computeJaccardSimilarity } from "./extractionAudit";
 
 // ==================== 类型定义 ====================
 
@@ -89,8 +90,9 @@ export function judgeContentRelation(
   existingContent: string,
   threshold?: number
 ): "consistent" | "contradictory" {
-  // TODO: 第4阶段实现
-  throw new Error("Not implemented");
+  const t = threshold ?? DEFAULT_EVOLUTION_CONFIG.consistencyThreshold;
+  const similarity = computeJaccardSimilarity(newContent, existingContent);
+  return similarity >= t ? "consistent" : "contradictory";
 }
 
 /**
@@ -98,6 +100,9 @@ export function judgeContentRelation(
  *
  * 基于当前置信度和确认次数（accessCount）动态计算提升增量。
  * 已有较高置信度的记忆，提升增量递减。
+ *
+ * 公式：increment = boostIncrement * (1 - currentConfidence) * decay
+ * 其中 decay = 1 / (1 + accessCount * 0.1)，确认次数越多衰减越快。
  *
  * @param currentConfidence - 当前置信度
  * @param accessCount - 已有的访问/确认次数
@@ -109,8 +114,20 @@ export function calculateBoostIncrement(
   accessCount: number,
   config?: EvolutionConfig
 ): number {
-  // TODO: 第4阶段实现
-  throw new Error("Not implemented");
+  const mergedConfig = { ...DEFAULT_EVOLUTION_CONFIG, ...config };
+
+  // 置信度越高，提升空间越小
+  const headroom = 1 - currentConfidence;
+  if (headroom <= 0) return 0;
+
+  // 确认次数越多，提升增量衰减
+  const decay = 1 / (1 + (accessCount || 0) * 0.1);
+
+  // 最终增量 = 基础增量 * 剩余空间比例 * 衰减因子
+  const increment = mergedConfig.boostIncrement * headroom * decay;
+
+  // 确保不超过 boostIncrement 上限
+  return Math.min(increment, mergedConfig.boostIncrement);
 }
 
 /**
@@ -118,50 +135,19 @@ export function calculateBoostIncrement(
  *
  * 演化流程：
  * 1. 检查新记忆是否为人格类型 → 若是，返回 SKIP
- * 2. 查询同一 versionGroup 的已有记忆
+ * 2. 检查是否有已有记忆可匹配
  * 3. 若无匹配 → 返回 NO_MATCH，正常写入
  * 4. 判断内容关系：
  *    - 一致 → BOOST：提升已有记忆置信度，跳过写入
  *    - 矛盾 → SUPERSEDE：降低已有记忆置信度，继续写入
- * 5. 执行数据库更新（调用 updateMemory）
+ *
+ * 注意：本函数只计算演化结果，不执行数据库更新。
+ * 数据库更新由调用方（memorySystem.addMemory）负责。
  *
  * @param newMemory - 待写入的新记忆
- * @param newMemory.content - 记忆内容
- * @param newMemory.kind - 记忆大类
- * @param newMemory.versionGroup - 版本分组（用于匹配已有记忆）
- * @param newMemory.userId - 用户 ID
  * @param existingMemories - 同一 versionGroup 的已有记忆列表
  * @param config - 可选的演化配置
  * @returns 演化结果
- *
- * @example
- * ```typescript
- * // 场景：用户再次确认住在上海
- * const result = await evolveConfidence(
- *   {
- *     content: "用户在上海上班",
- *     kind: "semantic",
- *     versionGroup: "user_work_location",
- *     userId: 1
- *   },
- *   [existingMemory] // 已有 "用户在上海工作"，confidence=0.6
- * );
- * // result.action === "BOOST"
- * // result.newConfidence === 0.75
- *
- * // 场景：用户说搬到北京了
- * const result2 = await evolveConfidence(
- *   {
- *     content: "用户搬到北京工作了",
- *     kind: "semantic",
- *     versionGroup: "user_work_location",
- *     userId: 1
- *   },
- *   [existingMemory] // 已有 "用户在上海工作"，confidence=0.6
- * );
- * // result2.action === "SUPERSEDE"
- * // result2.newConfidence === 0.4（旧记忆降低）
- * ```
  */
 export async function evolveConfidence(
   newMemory: {
@@ -173,6 +159,92 @@ export async function evolveConfidence(
   existingMemories: Memory[],
   config?: EvolutionConfig
 ): Promise<EvolutionResult> {
-  // TODO: 第4阶段实现
-  throw new Error("Not implemented");
+  const mergedConfig: Required<EvolutionConfig> = {
+    ...DEFAULT_EVOLUTION_CONFIG,
+    ...config,
+  };
+
+  // 1. 人格记忆不参与演化
+  if (newMemory.kind === "persona") {
+    return {
+      action: "SKIP",
+      reason: "人格类型记忆不参与 Confidence 动态演化",
+    };
+  }
+
+  // 2. 无 versionGroup 或无已有记忆 → NO_MATCH
+  if (!newMemory.versionGroup || existingMemories.length === 0) {
+    return {
+      action: "NO_MATCH",
+      reason: newMemory.versionGroup
+        ? "同一 versionGroup 下无已有记忆"
+        : "新记忆未指定 versionGroup，无法匹配",
+    };
+  }
+
+  // 3. 找到最相关的已有记忆（按置信度降序，取最高置信度的）
+  const sortedMemories = [...existingMemories].sort(
+    (a, b) => (b.confidence ?? 0) - (a.confidence ?? 0)
+  );
+  const targetMemory = sortedMemories[0];
+
+  // 4. 判断内容关系
+  const relation = judgeContentRelation(
+    newMemory.content,
+    targetMemory.content,
+    mergedConfig.consistencyThreshold
+  );
+
+  if (relation === "consistent") {
+    // BOOST：内容一致，提升已有记忆置信度
+    const previousConfidence = targetMemory.confidence ?? 0.5;
+    const increment = calculateBoostIncrement(
+      previousConfidence,
+      targetMemory.accessCount ?? 0,
+      mergedConfig
+    );
+    const newConfidence = Math.min(
+      previousConfidence + increment,
+      mergedConfig.maxConfidence
+    );
+
+    console.log(
+      `[ConfidenceEvolution] BOOST: memoryId=${targetMemory.id}, ` +
+        `confidence ${previousConfidence.toFixed(2)} → ${newConfidence.toFixed(2)} ` +
+        `(+${increment.toFixed(3)})`
+    );
+
+    return {
+      action: "BOOST",
+      affectedMemory: targetMemory,
+      previousConfidence,
+      newConfidence,
+      reason:
+        `新记忆与已有记忆内容一致（versionGroup="${newMemory.versionGroup}"），` +
+        `提升置信度 ${previousConfidence.toFixed(2)} → ${newConfidence.toFixed(2)}`,
+    };
+  } else {
+    // SUPERSEDE：内容矛盾，降低已有记忆置信度
+    const previousConfidence = targetMemory.confidence ?? 0.5;
+    const newConfidence = Math.max(
+      previousConfidence - mergedConfig.supersedePenalty,
+      mergedConfig.minConfidence
+    );
+
+    console.log(
+      `[ConfidenceEvolution] SUPERSEDE: memoryId=${targetMemory.id}, ` +
+        `confidence ${previousConfidence.toFixed(2)} → ${newConfidence.toFixed(2)} ` +
+        `(-${mergedConfig.supersedePenalty})`
+    );
+
+    return {
+      action: "SUPERSEDE",
+      affectedMemory: targetMemory,
+      previousConfidence,
+      newConfidence,
+      reason:
+        `新记忆与已有记忆内容矛盾（versionGroup="${newMemory.versionGroup}"），` +
+        `降低旧记忆置信度 ${previousConfidence.toFixed(2)} → ${newConfidence.toFixed(2)}`,
+    };
+  }
 }

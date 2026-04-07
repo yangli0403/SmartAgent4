@@ -13,6 +13,7 @@
  */
 
 import type { Memory } from "../../drizzle/schema";
+import { searchMemories } from "./memorySystem";
 
 // ==================== 类型定义 ====================
 
@@ -99,30 +100,58 @@ export function checkImportanceGate(
   importance: number,
   threshold?: number
 ): boolean {
-  // TODO: 第4阶段实现
-  throw new Error("Not implemented");
+  const t = threshold ?? DEFAULT_AUDIT_CONFIG.importanceThreshold;
+  return importance >= t;
 }
 
 /**
  * 计算两段文本的 Jaccard 相似度
  *
  * 基于分词后的词集合计算 Jaccard 系数：|A ∩ B| / |A ∪ B|。
- * 复用现有 memorySystem.ts 中的 computeJaccardSimilarity 逻辑。
  *
  * @param textA - 文本 A
  * @param textB - 文本 B
  * @returns Jaccard 相似度（0-1）
  */
 export function computeJaccardSimilarity(textA: string, textB: string): number {
-  // TODO: 第4阶段实现
-  throw new Error("Not implemented");
+  if (!textA || !textB) return 0;
+
+  // 使用字符级分词（适用于中文），同时按空格分割（适用于英文）
+  const tokenize = (text: string): Set<string> => {
+    const tokens = new Set<string>();
+    // 按空格和标点分词
+    const words = text.toLowerCase().split(/[\s,，。！？、；：""''（）\(\)\[\]]+/);
+    for (const word of words) {
+      if (word.length > 0) tokens.add(word);
+    }
+    // 对中文文本额外进行 bigram 分词
+    const cleaned = text.toLowerCase().replace(/\s+/g, "");
+    for (let i = 0; i < cleaned.length - 1; i++) {
+      tokens.add(cleaned.substring(i, i + 2));
+    }
+    return tokens;
+  };
+
+  const setA = tokenize(textA);
+  const setB = tokenize(textB);
+
+  if (setA.size === 0 && setB.size === 0) return 1;
+  if (setA.size === 0 || setB.size === 0) return 0;
+
+  let intersection = 0;
+  for (const token of setA) {
+    if (setB.has(token)) intersection++;
+  }
+
+  const union = setA.size + setB.size - intersection;
+  return union === 0 ? 0 : intersection / union;
 }
 
 /**
  * 去重校验
  *
- * 查询同一用户的已有记忆，计算新记忆与每条已有记忆的 Jaccard 相似度。
- * 若超过阈值，返回匹配到的记忆和相似度分数。
+ * 将新记忆与已有记忆列表进行 Jaccard 相似度比对，
+ * 仅比对同一类型的记忆。返回最高相似度的匹配。
  *
  * @param input - 待审计的记忆写入请求
  * @param existingMemories - 同一用户的已有记忆列表
@@ -134,8 +163,27 @@ export function checkDeduplication(
   existingMemories: Memory[],
   threshold?: number
 ): { matchedMemory: Memory; similarityScore: number } | null {
-  // TODO: 第4阶段实现
-  throw new Error("Not implemented");
+  const t = threshold ?? DEFAULT_AUDIT_CONFIG.deduplicationThreshold;
+
+  let bestMatch: Memory | null = null;
+  let bestScore = 0;
+
+  for (const existing of existingMemories) {
+    // 仅比对同一类型的记忆
+    if (existing.type !== input.type) continue;
+
+    const score = computeJaccardSimilarity(input.content, existing.content);
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = existing;
+    }
+  }
+
+  if (bestMatch && bestScore >= t) {
+    return { matchedMemory: bestMatch, similarityScore: bestScore };
+  }
+
+  return null;
 }
 
 /**
@@ -172,6 +220,103 @@ export async function auditMemoryExtraction(
   input: AuditInput,
   config?: AuditConfig
 ): Promise<AuditResult> {
-  // TODO: 第4阶段实现
-  throw new Error("Not implemented");
+  const mergedConfig: Required<AuditConfig> = {
+    ...DEFAULT_AUDIT_CONFIG,
+    ...config,
+  };
+
+  // 1. 基础字段校验
+  if (!input.content || input.content.trim().length === 0) {
+    return {
+      verdict: "REJECT",
+      rejectReason: "missing_required_fields",
+      feedbackMessage: "记忆内容不能为空，请提供有效的记忆内容。",
+    };
+  }
+
+  const validTypes = ["fact", "behavior", "preference", "emotion"];
+  if (!input.type || !validTypes.includes(input.type)) {
+    return {
+      verdict: "REJECT",
+      rejectReason: "missing_required_fields",
+      feedbackMessage: `记忆类型无效，必须是 ${validTypes.join("/")} 之一。`,
+    };
+  }
+
+  // 2. 重要性门控
+  if (!checkImportanceGate(input.importance, mergedConfig.importanceThreshold)) {
+    console.log(
+      `[ExtractionAudit] 拦截低重要性记忆: importance=${input.importance} < threshold=${mergedConfig.importanceThreshold}`
+    );
+    return {
+      verdict: "REJECT",
+      rejectReason: "low_importance",
+      feedbackMessage:
+        `记忆重要性过低（${input.importance}），未达到写入阈值（${mergedConfig.importanceThreshold}）。` +
+        `请仅存储对用户有实际价值的信息。`,
+    };
+  }
+
+  // 3. 去重校验 — 查询同一用户的已有记忆
+  try {
+    const existingMemories = await searchMemories({
+      userId: input.userId,
+      query: input.content,
+      type: input.type,
+      limit: mergedConfig.deduplicationSearchLimit,
+    });
+
+    const dupResult = checkDeduplication(
+      input,
+      existingMemories,
+      mergedConfig.deduplicationThreshold
+    );
+
+    if (dupResult) {
+      const { matchedMemory, similarityScore } = dupResult;
+
+      // 高相似度（>= 0.8）直接拒绝，中等相似度建议合并
+      if (similarityScore >= 0.8) {
+        console.log(
+          `[ExtractionAudit] 拦截重复记忆: similarity=${similarityScore.toFixed(2)}, ` +
+            `matchedId=${matchedMemory.id}`
+        );
+        return {
+          verdict: "REJECT",
+          rejectReason: "duplicate_content",
+          matchedMemory,
+          similarityScore,
+          feedbackMessage:
+            `记忆内容与已有记忆高度重复（相似度: ${(similarityScore * 100).toFixed(0)}%，` +
+            `已有记忆ID: ${matchedMemory.id}）。无需重复存储。`,
+        };
+      }
+
+      // 中等相似度，建议合并
+      console.log(
+        `[ExtractionAudit] 建议合并记忆: similarity=${similarityScore.toFixed(2)}, ` +
+          `matchedId=${matchedMemory.id}`
+      );
+      return {
+        verdict: "MERGE",
+        matchedMemory,
+        similarityScore,
+        feedbackMessage:
+          `记忆内容与已有记忆相似（相似度: ${(similarityScore * 100).toFixed(0)}%，` +
+          `已有记忆ID: ${matchedMemory.id}）。建议合并更新而非新增。`,
+      };
+    }
+  } catch (error) {
+    // 去重查询失败不应阻塞写入，记录警告后放行
+    console.warn(
+      "[ExtractionAudit] 去重校验查询失败，放行写入:",
+      (error as Error).message
+    );
+  }
+
+  // 全部通过
+  return {
+    verdict: "PASS",
+    feedbackMessage: "审计通过，记忆可以写入。",
+  };
 }

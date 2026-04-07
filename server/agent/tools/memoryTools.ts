@@ -22,6 +22,8 @@ import {
   type MemorySearchOptions,
 } from "../../memory/memorySystem";
 import type { InsertMemory } from "../../../drizzle/schema";
+import { auditMemoryExtraction } from "../../memory/extractionAudit";
+import { generateEmbedding } from "../../memory/embeddingService";
 
 // ==================== 常量 ====================
 
@@ -66,6 +68,34 @@ async function memoryStoreImpl(args: Record<string, unknown>): Promise<string> {
   }
 
   try {
+    // --- 新增：审计层检查（重要性门控 + 去重） ---
+    const auditResult = await auditMemoryExtraction({
+      userId,
+      content: content.trim(),
+      type,
+      importance: Math.max(0, Math.min(1, importance)),
+    });
+
+    if (auditResult.verdict === "REJECT") {
+      console.log(
+        `[MemoryTools] 审计拒绝: ${auditResult.reason}`
+      );
+      return `记忆未存储：${auditResult.reason}`;
+    }
+
+    if (auditResult.verdict === "MERGE" && auditResult.matchedMemory) {
+      // 建议合并：更新已有记忆而非新建
+      const mergeResult = await updateMemory(auditResult.matchedMemory.id, {
+        content: content.trim(),
+        importance: Math.max(0, Math.min(1, importance)),
+        confidence: Math.max(0, Math.min(1, confidence)),
+        tags: tags || undefined,
+      });
+      if (mergeResult) {
+        return `记忆已合并到已有记忆 ID:${auditResult.matchedMemory.id}（相似度: ${(auditResult.similarityScore ?? 0).toFixed(2)}）。内容已更新。`;
+      }
+    }
+
     const memory: InsertMemory = {
       userId,
       content: content.trim(),

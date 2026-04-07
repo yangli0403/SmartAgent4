@@ -63,6 +63,9 @@ describe("MemoryExtractionNode", () => {
       // 确保环境变量未设置
       delete process.env.MEMORY_AUTO_EXTRACTION;
 
+      // 解耦后行为检测始终执行，需要返回 Promise
+      mockDetectAndPersistPatterns.mockResolvedValue(undefined);
+
       const { memoryExtractionNode } = await import(
         "../memoryExtractionNode"
       );
@@ -72,11 +75,14 @@ describe("MemoryExtractionNode", () => {
 
       // 不应调用 LLM 提取
       expect(mockExtractMemoriesFromConversation).not.toHaveBeenCalled();
-      expect(mockDetectAndPersistPatterns).not.toHaveBeenCalled();
+      // 解耦后行为检测始终执行
+      expect(mockDetectAndPersistPatterns).toHaveBeenCalledTimes(1);
     });
 
     it("应始终更新工作记忆", async () => {
       delete process.env.MEMORY_AUTO_EXTRACTION;
+
+      mockDetectAndPersistPatterns.mockResolvedValue(undefined);
 
       const { memoryExtractionNode } = await import(
         "../memoryExtractionNode"
@@ -91,6 +97,8 @@ describe("MemoryExtractionNode", () => {
 
     it("应返回空对象（不修改状态）", async () => {
       delete process.env.MEMORY_AUTO_EXTRACTION;
+
+      mockDetectAndPersistPatterns.mockResolvedValue(undefined);
 
       const { memoryExtractionNode } = await import(
         "../memoryExtractionNode"

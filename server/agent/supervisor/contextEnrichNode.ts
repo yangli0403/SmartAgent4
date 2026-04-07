@@ -32,6 +32,11 @@ import {
   extractDialogueSlotsFromMessages,
   mergeDialogueSlotsWithLocationCity,
 } from "./dialogueSlots";
+import {
+  makePreRetrievalDecision,
+  type DialogueEntry,
+} from "../../memory/preRetrievalDecision";
+import { generateEmbedding } from "../../memory/embeddingService";
 
 /**
  * 上下文增强节点
@@ -97,12 +102,62 @@ export async function contextEnrichNode(
       );
     }
 
+    // === 新增：Pre-Retrieval Decision 检索前决策 ===
+    let shouldRetrieve = true;
+    let retrievalQuery = userText;
+
+    if (!prefetchHit) {
+      try {
+        // 构建对话历史（最近 5 轮）
+        const dialogueHistory: DialogueEntry[] = messages
+          .slice(-10)
+          .filter((m) => {
+            const type = m._getType();
+            return type === "human" || type === "ai";
+          })
+          .map((m) => ({
+            role: (m._getType() === "human" ? "user" : "assistant") as "user" | "assistant",
+            content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+          }));
+
+        const decision = await makePreRetrievalDecision(
+          userText,
+          dialogueHistory
+        );
+
+        shouldRetrieve = decision.decision === "RETRIEVE";
+        if (decision.rewrittenQuery) {
+          retrievalQuery = decision.rewrittenQuery;
+        }
+
+        console.log(
+          `[ContextEnrichNode] Pre-Retrieval Decision: ${decision.decision} ` +
+            `(source=${decision.source}, ${decision.durationMs}ms)` +
+            (decision.rewrittenQuery ? `, rewritten="${decision.rewrittenQuery}"` : "")
+        );
+      } catch (error) {
+        console.warn(
+          "[ContextEnrichNode] Pre-Retrieval Decision failed, defaulting to RETRIEVE:",
+          (error as Error).message
+        );
+        shouldRetrieve = true;
+      }
+    }
+
+    // === 新增：生成查询向量（用于混合检索） ===
+    let queryEmbedding: number[] | null = null;
+    if (shouldRetrieve && !prefetchHit) {
+      queryEmbedding = await generateEmbedding(retrievalQuery);
+    }
+
     // === 并行执行记忆检索和画像构建 ===
-    // 缓存命中时使用预取的格式化记忆；否则按用户 + 当前问句检索长期记忆
+    // 缓存命中时使用预取的格式化记忆；否则根据 Pre-Retrieval Decision 决定是否检索
     const [memoryContext, userProfile, emotionsAvailable] = await Promise.all([
       prefetchHit
         ? Promise.resolve(cachedMemoryContext)
-        : getFormattedMemoryContext(userId, userText),
+        : shouldRetrieve
+          ? getFormattedMemoryContext(userId, retrievalQuery, queryEmbedding)
+          : Promise.resolve(""),
       getUserProfileSnapshot(userId),
       getEmotionsClient().isAvailable(),
     ]);

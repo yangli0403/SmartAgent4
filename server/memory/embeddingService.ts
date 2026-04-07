@@ -12,6 +12,8 @@
  * @module embeddingService
  */
 
+import OpenAI from "openai";
+
 // ==================== 类型定义 ====================
 
 /** Embedding 服务配置 */
@@ -79,7 +81,7 @@ let serviceInstance: EmbeddingServiceInstance | null = null;
  */
 class EmbeddingServiceInstance {
   private config: Required<EmbeddingServiceConfig>;
-  private client: any; // OpenAI 客户端实例，延迟初始化
+  private client: OpenAI | null;
 
   constructor(config: Required<EmbeddingServiceConfig>) {
     this.config = config;
@@ -89,12 +91,25 @@ class EmbeddingServiceInstance {
   /**
    * 延迟初始化 OpenAI 兼容客户端
    *
-   * 使用 @langchain/openai 或 openai SDK 创建客户端。
+   * 使用 openai SDK 创建客户端，兼容 DashScope 和 OpenAI 接口。
    * 延迟初始化避免在模块加载时就要求 API Key 可用。
    */
-  private async getClient(): Promise<any> {
-    // TODO: 第4阶段实现 — 初始化 OpenAI 兼容客户端
-    throw new Error("Not implemented");
+  private getClient(): OpenAI {
+    if (this.client) return this.client;
+
+    if (!this.config.apiKey) {
+      throw new Error(
+        "Embedding API Key 未配置。请设置 DASHSCOPE_API_KEY 环境变量。"
+      );
+    }
+
+    this.client = new OpenAI({
+      apiKey: this.config.apiKey,
+      baseURL: this.config.baseURL,
+      timeout: this.config.timeoutMs,
+    });
+
+    return this.client;
   }
 
   /**
@@ -112,8 +127,41 @@ class EmbeddingServiceInstance {
    * ```
    */
   async generateEmbedding(text: string): Promise<EmbeddingResult> {
-    // TODO: 第4阶段实现
-    throw new Error("Not implemented");
+    const startTime = Date.now();
+
+    if (!text || text.trim().length === 0) {
+      console.warn("[EmbeddingService] 输入文本为空，跳过 Embedding 生成");
+      return { embedding: null, tokenUsage: 0, durationMs: 0 };
+    }
+
+    try {
+      const client = this.getClient();
+      const response = await client.embeddings.create({
+        model: this.config.model,
+        input: text.trim(),
+        dimensions: this.config.dimensions,
+      });
+
+      const embedding = response.data[0]?.embedding ?? null;
+      const tokenUsage = response.usage?.total_tokens ?? 0;
+      const durationMs = Date.now() - startTime;
+
+      if (embedding) {
+        console.log(
+          `[EmbeddingService] 生成成功: 维度=${embedding.length}, ` +
+            `tokens=${tokenUsage}, 耗时=${durationMs}ms`
+        );
+      }
+
+      return { embedding, tokenUsage, durationMs };
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      console.warn(
+        `[EmbeddingService] 生成失败 (${durationMs}ms):`,
+        (error as Error).message
+      );
+      return { embedding: null, tokenUsage: 0, durationMs };
+    }
   }
 
   /**
@@ -136,8 +184,82 @@ class EmbeddingServiceInstance {
    * ```
    */
   async generateEmbeddingBatch(texts: string[]): Promise<BatchEmbeddingResult> {
-    // TODO: 第4阶段实现
-    throw new Error("Not implemented");
+    const startTime = Date.now();
+
+    if (!texts || texts.length === 0) {
+      return {
+        embeddings: [],
+        totalTokenUsage: 0,
+        successCount: 0,
+        failureCount: 0,
+        durationMs: 0,
+      };
+    }
+
+    const allEmbeddings: (number[] | null)[] = new Array(texts.length).fill(null);
+    let totalTokenUsage = 0;
+    let successCount = 0;
+    let failureCount = 0;
+
+    // 按 batchSize 分批处理
+    for (let i = 0; i < texts.length; i += this.config.batchSize) {
+      const batchTexts = texts.slice(i, i + this.config.batchSize);
+      const batchIndices = batchTexts.map((_, idx) => i + idx);
+
+      // 过滤空文本，记录其在原始数组中的位置
+      const validEntries: { originalIndex: number; text: string }[] = [];
+      for (let j = 0; j < batchTexts.length; j++) {
+        const trimmed = batchTexts[j]?.trim();
+        if (trimmed && trimmed.length > 0) {
+          validEntries.push({ originalIndex: batchIndices[j], text: trimmed });
+        } else {
+          failureCount++;
+        }
+      }
+
+      if (validEntries.length === 0) continue;
+
+      try {
+        const client = this.getClient();
+        const response = await client.embeddings.create({
+          model: this.config.model,
+          input: validEntries.map((e) => e.text),
+          dimensions: this.config.dimensions,
+        });
+
+        totalTokenUsage += response.usage?.total_tokens ?? 0;
+
+        for (const item of response.data) {
+          const entry = validEntries[item.index];
+          if (entry && item.embedding) {
+            allEmbeddings[entry.originalIndex] = item.embedding;
+            successCount++;
+          } else {
+            failureCount++;
+          }
+        }
+      } catch (error) {
+        console.warn(
+          `[EmbeddingService] 批量生成第 ${i / this.config.batchSize + 1} 批失败:`,
+          (error as Error).message
+        );
+        failureCount += validEntries.length;
+      }
+    }
+
+    const durationMs = Date.now() - startTime;
+    console.log(
+      `[EmbeddingService] 批量生成完成: 成功=${successCount}, ` +
+        `失败=${failureCount}, tokens=${totalTokenUsage}, 耗时=${durationMs}ms`
+    );
+
+    return {
+      embeddings: allEmbeddings,
+      totalTokenUsage,
+      successCount,
+      failureCount,
+      durationMs,
+    };
   }
 
   /** 获取当前配置（只读） */
@@ -219,4 +341,13 @@ export async function generateEmbeddingBatch(
 ): Promise<BatchEmbeddingResult> {
   const service = getEmbeddingService();
   return service.generateEmbeddingBatch(texts);
+}
+
+/**
+ * 重置服务实例（仅用于测试）
+ *
+ * 清除全局单例，使下次调用 getEmbeddingService() 重新初始化。
+ */
+export function _resetServiceForTesting(): void {
+  serviceInstance = null;
 }
