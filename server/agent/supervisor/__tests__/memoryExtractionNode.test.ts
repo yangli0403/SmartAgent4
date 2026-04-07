@@ -63,7 +63,7 @@ describe("MemoryExtractionNode", () => {
       // 确保环境变量未设置
       delete process.env.MEMORY_AUTO_EXTRACTION;
 
-      // 解耦后行为检测始终执行，需要返回 Promise
+      // 解耦后行为检测基于对话计数器触发
       mockDetectAndPersistPatterns.mockResolvedValue(undefined);
 
       const { memoryExtractionNode } = await import(
@@ -75,8 +75,33 @@ describe("MemoryExtractionNode", () => {
 
       // 不应调用 LLM 提取
       expect(mockExtractMemoriesFromConversation).not.toHaveBeenCalled();
-      // 解耦后行为检测始终执行
+      // 行为检测基于对话计数器，第1轮不会触发（阈值默认=10）
+      expect(mockDetectAndPersistPatterns).not.toHaveBeenCalled();
+    });
+
+    it("应在达到对话轮数阈值时触发行为检测", async () => {
+      delete process.env.MEMORY_AUTO_EXTRACTION;
+      process.env.BEHAVIOR_DETECTION_THRESHOLD = "3";
+
+      mockDetectAndPersistPatterns.mockResolvedValue(undefined);
+
+      const { memoryExtractionNode } = await import(
+        "../memoryExtractionNode"
+      );
+
+      const state = createMockState();
+
+      // 第1轮和第2轮不触发
+      await memoryExtractionNode(state);
+      await memoryExtractionNode(state);
+      expect(mockDetectAndPersistPatterns).not.toHaveBeenCalled();
+
+      // 第3轮触发
+      await memoryExtractionNode(state);
       expect(mockDetectAndPersistPatterns).toHaveBeenCalledTimes(1);
+
+      // 清理
+      delete process.env.BEHAVIOR_DETECTION_THRESHOLD;
     });
 
     it("应始终更新工作记忆", async () => {

@@ -47,6 +47,15 @@ import { detectAndPersistPatterns } from "../../memory/behaviorDetector";
 export const AUTO_EXTRACTION_ENABLED: boolean =
   process.env.MEMORY_AUTO_EXTRACTION === "true" ? true : false;
 
+/** 行为检测触发阈值（对话轮数） */
+const BEHAVIOR_DETECTION_THRESHOLD = parseInt(
+  process.env.BEHAVIOR_DETECTION_THRESHOLD ?? "10",
+  10
+);
+
+/** 每个用户的对话轮数计数器 */
+const userDialogueCounters = new Map<number, number>();
+
 /**
  * 记忆提取节点
  *
@@ -111,20 +120,37 @@ export async function memoryExtractionNode(
     });
   }
 
-  // === 行为模式检测（解耦：始终执行，不依赖自动提取开关） ===
+  // === 行为模式检测（解耦：基于对话轮数阈值独立触发） ===
   // 记忆优化迭代：行为检测从自动提取流程中解耦，独立运行
-  // 即使 Agent 使用 memory_store 主动存储，行为模式仍需要从对话中检测
-  detectAndPersistPatterns({
-    userId,
-    conversationHistory,
-    extractedMemories: [], // 解耦后不依赖提取结果，行为检测器直接分析对话
-    timestamp: new Date().toISOString(),
-  }).catch((err) => {
-    console.error(
-      "[MemoryExtractionNode] Behavior detection failed:",
-      (err as Error).message
+  // 基于对话轮数计数，达到阈值时触发一次行为检测，然后重置计数器
+  const currentCount = (userDialogueCounters.get(userId) || 0) + 1;
+  userDialogueCounters.set(userId, currentCount);
+
+  if (currentCount >= BEHAVIOR_DETECTION_THRESHOLD) {
+    console.log(
+      `[MemoryExtractionNode] Dialogue count ${currentCount} >= ${BEHAVIOR_DETECTION_THRESHOLD}, ` +
+        `triggering behavior detection for user ${userId}`
     );
-  });
+    userDialogueCounters.set(userId, 0); // 重置计数器
+
+    // 异步触发行为检测（fire-and-forget）
+    detectAndPersistPatterns({
+      userId,
+      conversationHistory,
+      extractedMemories: [], // 解耦后不依赖提取结果，行为检测器直接分析对话
+      timestamp: new Date().toISOString(),
+    }).catch((err) => {
+      console.error(
+        "[MemoryExtractionNode] Behavior detection failed:",
+        (err as Error).message
+      );
+    });
+  } else {
+    console.log(
+      `[MemoryExtractionNode] Dialogue count ${currentCount}/${BEHAVIOR_DETECTION_THRESHOLD} ` +
+        `for user ${userId}, behavior detection not yet triggered`
+    );
+  }
 
   // === 自动提取记忆（受开关控制） ===
   if (!AUTO_EXTRACTION_ENABLED) {

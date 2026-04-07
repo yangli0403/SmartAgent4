@@ -73,7 +73,11 @@ async function memoryStoreImpl(args: Record<string, unknown>): Promise<string> {
       userId,
       content: content.trim(),
       type,
+      kind,
       importance: Math.max(0, Math.min(1, importance)),
+      confidence: Math.max(0, Math.min(1, confidence)),
+      versionGroup,
+      tags,
     });
 
     if (auditResult.verdict === "REJECT") {
