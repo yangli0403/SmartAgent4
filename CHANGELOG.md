@@ -4,6 +4,104 @@
 
 ---
 
+## [1.5.0] - 2026-04-13
+
+### 第八轮迭代：AIRI 前端角色舞台集成（Live2D + 事件驱动 + 状态机）
+
+本轮迭代基于 PRODUCT_SPEC_AIRI_STAGE.md 定义的 7 项功能需求（P0×4 + P1×3），实现 AIRI 前端角色舞台从零到一的完整构建。
+
+#### 新增模块（前端核心库 5 个）
+
+**新增**
+- `client/src/lib/airi-stage/types.ts` — 舞台事件类型定义
+  - StageEventMap、8 种事件类型（expression, motion, tts_start, tts_stop, tts_level, idle_state, model_loaded, model_error）
+  - StageConfig、StageStore 状态机接口
+- `client/src/lib/airi-stage/stageEventBus.ts` — 基于 mitt 的事件总线
+  - dispatchStageEventsFromTags()：从 emotionParser 标签转换为舞台事件
+  - notifyThinking/notifyIdle/notifyListening/notifyTtsStart/notifyTtsStop/notifyTtsLevel 便捷函数
+- `client/src/lib/airi-stage/useStageStore.ts` — Zustand 状态管理
+  - 表情过渡、动作优先级、口型电平、闲置状态四大状态切片
+  - 配置管理、模型加载状态、全局重置
+- `client/src/lib/airi-stage/expressionMapping.ts` — 16 种表情到 Live2D 参数的映射
+- `client/src/lib/airi-stage/motionMapping.ts` — 12 种动作到 Live2D 动作组/索引的映射
+
+#### 新增模块（驱动器 Hooks 4 个）
+
+**新增**
+- `client/src/hooks/useExpressionDriver.ts` — 表情驱动器
+  - 监听 expression 事件，通过 requestAnimationFrame + lerp 平滑插值更新 Live2D 参数
+- `client/src/hooks/useMotionDriver.ts` — 动作驱动器
+  - 监听 motion 事件，支持优先级打断，调用 model.motion() 播放动作
+- `client/src/hooks/useLipsyncDriver.ts` — 口型驱动器
+  - 监听 tts_start/tts_stop/tts_level 事件，通过平滑因子映射音量到口型参数
+- `client/src/hooks/useIdleManager.ts` — 闲置管理器
+  - 监听 idle_state 事件，超时自动触发呼吸/眨眼动作
+
+#### 新增模块（UI 组件 2 个）
+
+**新增**
+- `client/src/components/airi-stage/AiriStageContainer.tsx` — Live2D 画布容器
+  - PixiJS Application 初始化、模型加载、自适应缩放
+  - 集成四个驱动器 Hooks
+  - 加载中/错误/禁用状态 UI
+- `client/src/components/airi-stage/BridgeStatusPanel.tsx` — Bridge 状态面板
+  - 连接状态显示、手动连接/断开按钮
+
+#### 修改模块
+
+**修改**
+- `client/src/pages/Cockpit.tsx` — 集成 AiriStageContainer 和 BridgeStatusPanel 到驾驶舱页面
+
+#### Phase 3：接口设计
+
+**新增**
+- `docs/INTERFACE_DESIGN_AIRI_STAGE.md` — 全量接口契约文档
+
+#### Phase 5：需求反思
+
+**新增**
+- `docs/REQUIREMENTS_REFLECTION_AIRI_STAGE.md` — 第八轮迭代需求反思报告
+
+#### Phase 6：自动化测试
+
+**新增**
+- `client/src/lib/airi-stage/__tests__/stageEventBus.test.ts` — 15 个测试用例
+- `client/src/lib/airi-stage/__tests__/stageEventBus.supplement.test.ts` — 5 个补充测试
+- `client/src/lib/airi-stage/__tests__/expressionMapping.test.ts` — 8 个测试用例
+- `client/src/lib/airi-stage/__tests__/useStageStore.test.ts` — 16 个测试用例
+- `client/src/lib/airi-stage/__tests__/useStageStore.supplement.test.ts` — 7 个补充测试
+- `client/src/hooks/__tests__/useExpressionDriver.test.ts` — 4 个测试用例
+- `client/src/hooks/__tests__/useMotionDriver.test.ts` — 5 个测试用例
+- `client/src/hooks/__tests__/useLipsyncDriver.test.ts` — 4 个测试用例
+- `client/src/hooks/__tests__/useIdleManager.test.ts` — 7 个测试用例
+- `docs/TESTING_AIRI_STAGE.md` — 前端全量测试文档
+
+**测试结果**
+- 前端全量测试：71 个，全部通过
+- AIRI 核心库覆盖率：语句/分支/函数 100%
+
+#### Phase 6b：AI 架构指南
+
+**修改**
+- `CLAUDE.md` — 更新为第八轮迭代版本，新增 AIRI 前端角色舞台章节
+
+#### Phase 7：文档与交付
+
+**修改**
+- `README.md` — 更新技术栈、项目结构、测试信息、开发路线图、文档列表
+- `CHANGELOG.md` — 新增第八轮迭代变更记录
+- `PROJECT_STATUS.md` — 更新阶段状态
+
+#### 新增依赖
+
+- `pixi.js` (^7.x) — 2D 渲染引擎
+- `pixi-live2d-display` (^0.4.x) — Live2D 模型加载与渲染
+- `mitt` (^3.x) — 轻量级事件总线
+- `zustand` (^5.x) — 前端状态管理
+- `jsdom` (devDependency) — 前端组件测试环境
+
+---
+
 ## [1.4.0] - 2026-04-07
 
 ### 第七轮迭代：记忆系统优化（Embedding + 智能检索 + 质量门控）
