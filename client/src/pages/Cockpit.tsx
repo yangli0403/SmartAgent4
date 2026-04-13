@@ -25,7 +25,6 @@ import type { ChatUiMessage } from "@shared/chatTts";
 import MemoryCards from "@/components/cockpit/MemoryCards";
 import { RealtimeAsrSession } from "@/lib/realtimeAsrStream";
 import { AiriStageContainer } from "@/components/airi-stage/AiriStageContainer";
-import { BridgeStatusPanel } from "@/components/airi-stage/BridgeStatusPanel";
 import { dispatchStageEventsFromTags, notifyThinking, notifyIdle } from "@/lib/airi-stage/stageEventBus";
 import { parseEmotionTags } from "@/lib/emotionParser";
 
@@ -247,14 +246,21 @@ export default function Cockpit() {
         }}
       />
 
-      {/* ==================== AIRI 角色舞台 ==================== */}
-      <div className="absolute left-20 bottom-[200px] z-10 w-[320px] h-[400px]">
-        <AiriStageContainer
-          enabled={true}
-          className="w-full h-full"
-        />
-        <div className="mt-2 w-full">
-          <BridgeStatusPanel className="bg-white/60 backdrop-blur-md" />
+      {/* ==================== AIRI 角色舞台（居中偏左显示，融入车辆背景） ==================== */}
+      <div className="absolute inset-0 z-[5] flex items-center justify-center pointer-events-none">
+        <div
+          className="pointer-events-auto"
+          style={{
+            width: '420px',
+            height: '560px',
+            marginRight: '280px',
+            marginTop: '40px',
+          }}
+        >
+          <AiriStageContainer
+            enabled={true}
+            className="w-full h-full"
+          />
         </div>
       </div>
 

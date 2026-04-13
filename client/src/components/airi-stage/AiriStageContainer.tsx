@@ -8,12 +8,17 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import * as PIXI from "pixi.js";
+import { Live2DModel } from "pixi-live2d-display/cubism4";
 import { useStageStore } from "@/lib/airi-stage/useStageStore";
 import { stageEventBus } from "@/lib/airi-stage/stageEventBus";
 import { useExpressionDriver } from "@/hooks/useExpressionDriver";
 import { useMotionDriver } from "@/hooks/useMotionDriver";
 import { useLipsyncDriver } from "@/hooks/useLipsyncDriver";
 import { useIdleManager } from "@/hooks/useIdleManager";
+
+// pixi-live2d-display 需要全局 PIXI 引用
+(window as any).PIXI = PIXI;
 
 /** 组件 Props */
 interface AiriStageContainerProps {
@@ -40,7 +45,7 @@ export function AiriStageContainer({
   onModelError,
 }: AiriStageContainerProps) {
   const canvasContainerRef = useRef<HTMLDivElement>(null);
-  const appRef = useRef<any>(null);
+  const appRef = useRef<PIXI.Application | null>(null);
   const modelRef = useRef<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,39 +71,46 @@ export function AiriStageContainer({
     setError(null);
 
     try {
-      // 动态导入 PixiJS 和 pixi-live2d-display（避免 SSR 问题）
-      const PIXI = await import("pixi.js");
-      const { Live2DModel } = await import("pixi-live2d-display");
+      // 清理旧实例
+      if (appRef.current) {
+        appRef.current.destroy(true, { children: true, texture: true });
+        appRef.current = null;
+      }
 
-      // 注册 Live2D 到 PIXI
+      // 注册 Live2D Ticker
       Live2DModel.registerTicker(PIXI.Ticker);
 
-      // 创建 PixiJS 应用
+      const container = canvasContainerRef.current;
+      const width = container.clientWidth || config.canvasWidth;
+      const height = container.clientHeight || config.canvasHeight;
+
+      // 创建 PixiJS 应用（v6 API）
       const app = new PIXI.Application({
-        width: config.canvasWidth,
-        height: config.canvasHeight,
-        backgroundAlpha: 0,
+        width,
+        height,
+        transparent: true,
         antialias: true,
         resolution: window.devicePixelRatio || 1,
         autoDensity: true,
       });
 
       // 挂载画布到 DOM
-      canvasContainerRef.current.innerHTML = "";
-      canvasContainerRef.current.appendChild(app.view as HTMLCanvasElement);
+      container.innerHTML = "";
+      container.appendChild(app.view as HTMLCanvasElement);
       appRef.current = app;
 
       // 加载 Live2D 模型
       const model = await Live2DModel.from(resolvedModelUrl, {
-        autoInteract: false,
+        autoInteract: true,
         autoUpdate: true,
       });
 
-      // 设置模型位置和缩放
-      model.scale.set(config.modelScale);
-      model.x = config.canvasWidth / 2 + config.modelOffsetX;
-      model.y = config.canvasHeight / 2 + config.modelOffsetY;
-      model.anchor.set(0.5, 0.5);
+      // 自适应缩放：根据容器尺寸自动计算
+      const scaleVal = Math.min(width / model.width, height / model.height) * 0.85;
+      model.scale.set(scaleVal);
+      model.x = width / 2;
+      model.y = height * 0.92;
+      model.anchor.set(0.5, 1.0);
 
       app.stage.addChild(model);
       modelRef.current = model;
@@ -127,9 +139,6 @@ export function AiriStageContainer({
     resolvedModelUrl,
     config.canvasWidth,
     config.canvasHeight,
-    config.modelScale,
-    config.modelOffsetX,
-    config.modelOffsetY,
     setModelLoaded,
     setModelError,
     onModelLoaded,
@@ -140,12 +149,14 @@ export function AiriStageContainer({
    * 组件挂载时初始化，卸载时清理
    */
   useEffect(() => {
-    initStage();
+    // 延迟一帧确保 DOM 已渲染
+    const timer = setTimeout(() => initStage(), 100);
 
     return () => {
+      clearTimeout(timer);
       // 清理 PixiJS 应用
       if (appRef.current) {
-        appRef.current.destroy(true, { children: true, texture: true, baseTexture: true });
+        appRef.current.destroy(true, { children: true, texture: true });
         appRef.current = null;
       }
       modelRef.current = null;
@@ -157,26 +168,27 @@ export function AiriStageContainer({
    */
   useEffect(() => {
     const handleResize = () => {
-      if (!appRef.current || !canvasContainerRef.current) return;
+      if (!appRef.current || !canvasContainerRef.current || !modelRef.current) return;
       const container = canvasContainerRef.current;
       const width = container.clientWidth;
       const height = container.clientHeight;
       appRef.current.renderer.resize(width, height);
 
-      if (modelRef.current) {
-        modelRef.current.x = width / 2 + config.modelOffsetX;
-        modelRef.current.y = height / 2 + config.modelOffsetY;
-      }
+      const model = modelRef.current;
+      const scaleVal = Math.min(width / (model.width / model.scale.x), height / (model.height / model.scale.y)) * 0.85;
+      model.scale.set(scaleVal);
+      model.x = width / 2;
+      model.y = height * 0.92;
     };
 
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [config.modelOffsetX, config.modelOffsetY]);
+  }, []);
 
   // 未启用时显示占位符
   if (!enabled) {
     return (
-      <div className={`flex items-center justify-center bg-gray-100 rounded-lg ${className}`}>
+      <div className={`flex items-center justify-center bg-gray-100/30 rounded-lg ${className}`}>
         <div className="text-center text-gray-400">
           <div className="text-4xl mb-2">🤖</div>
           <p className="text-sm">角色舞台未启用</p>
@@ -186,31 +198,30 @@ export function AiriStageContainer({
   }
 
   return (
-    <div className={`relative overflow-hidden rounded-lg ${className}`}>
+    <div className={`relative overflow-hidden ${className}`}>
       {/* Live2D 渲染容器 */}
       <div
         ref={canvasContainerRef}
         className="w-full h-full"
-        style={{ minHeight: config.canvasHeight }}
       />
 
       {/* 加载状态 */}
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/10">
+        <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2" />
-            <p className="text-sm text-gray-600">加载角色模型中...</p>
+            <p className="text-sm text-gray-500">加载角色模型中...</p>
           </div>
         </div>
       )}
 
       {/* 错误状态 */}
       {error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-red-50/80">
+        <div className="absolute inset-0 flex items-center justify-center bg-red-50/50 rounded-lg">
           <div className="text-center p-4">
             <div className="text-3xl mb-2">⚠️</div>
             <p className="text-sm text-red-600 mb-2">模型加载失败</p>
-            <p className="text-xs text-red-400">{error}</p>
+            <p className="text-xs text-red-400 max-w-[200px]">{error}</p>
             <button
               onClick={initStage}
               className="mt-2 px-3 py-1 text-xs bg-red-100 text-red-600 rounded hover:bg-red-200"
