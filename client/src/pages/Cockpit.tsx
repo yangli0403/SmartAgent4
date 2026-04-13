@@ -24,6 +24,10 @@ import AssistantPanel from "@/components/cockpit/AssistantPanel";
 import type { ChatUiMessage } from "@shared/chatTts";
 import MemoryCards from "@/components/cockpit/MemoryCards";
 import { RealtimeAsrSession } from "@/lib/realtimeAsrStream";
+import { AiriStageContainer } from "@/components/airi-stage/AiriStageContainer";
+import { BridgeStatusPanel } from "@/components/airi-stage/BridgeStatusPanel";
+import { dispatchStageEventsFromTags, notifyThinking, notifyIdle } from "@/lib/airi-stage/stageEventBus";
+import { parseEmotionTags } from "@/lib/emotionParser";
 
 export default function Cockpit() {
   const { user, isAuthenticated } = useAuth();
@@ -73,6 +77,12 @@ export default function Cockpit() {
         ...prev,
         { role: "assistant", content: data.response },
       ]);
+      // 解析情感标签并分发到舞台事件总线
+      const parsed = parseEmotionTags(data.response);
+      if (parsed.tags.length > 0) {
+        dispatchStageEventsFromTags(parsed.tags);
+      }
+      notifyIdle();
       utils.chat.listSessions.invalidate();
       void utils.memory.list.invalidate();
       if (data.persisted === false) {
@@ -81,6 +91,7 @@ export default function Cockpit() {
     },
     onError: (error) => {
       toast.error("发送消息失败: " + error.message);
+      notifyIdle();
     },
   });
 
@@ -150,6 +161,8 @@ export default function Cockpit() {
     const userMessage = message.trim();
     setMessage("");
     setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
+    // 通知舞台进入 thinking 状态
+    notifyThinking();
     sendMessageMutation.mutate({
       message: userMessage,
       sessionId: currentSessionId ?? undefined,
@@ -233,6 +246,17 @@ export default function Cockpit() {
           backgroundRepeat: "no-repeat",
         }}
       />
+
+      {/* ==================== AIRI 角色舞台 ==================== */}
+      <div className="absolute left-20 bottom-[200px] z-10 w-[320px] h-[400px]">
+        <AiriStageContainer
+          enabled={true}
+          className="w-full h-full"
+        />
+        <div className="mt-2 w-full">
+          <BridgeStatusPanel className="bg-white/60 backdrop-blur-md" />
+        </div>
+      </div>
 
       {/* ==================== 顶栏 ==================== */}
       <header className="absolute top-0 left-0 right-0 z-20 flex items-start justify-between px-8 pt-5">
