@@ -28,6 +28,24 @@ import { AiriStageContainer } from "@/components/airi-stage/AiriStageContainer";
 import { dispatchStageEventsFromTags, notifyThinking, notifyIdle } from "@/lib/airi-stage/stageEventBus";
 import { parseEmotionTags } from "@/lib/emotionParser";
 
+/** Ark LLM 代理地址（轻量级直连模式） */
+const ARK_PROXY_URL = import.meta.env.VITE_ARK_PROXY_URL || "";
+
+/** 直接调用 Ark LLM 代理 */
+async function callArkProxy(message: string, sessionId?: string): Promise<{ response: string; persisted: boolean }> {
+  const proxyBase = ARK_PROXY_URL || `${window.location.protocol}//${window.location.hostname}:3001`;
+  const res = await fetch(`${proxyBase}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, sessionId: sessionId || "default" }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Ark Proxy error: ${res.status} - ${errText}`);
+  }
+  return res.json();
+}
+
 export default function Cockpit() {
   const { user, isAuthenticated } = useAuth();
   const skipOAuth = import.meta.env.VITE_SKIP_OAUTH === "true";
@@ -70,6 +88,10 @@ export default function Cockpit() {
     );
   };
 
+  // Ark 直连模式状态：如果配置了 VITE_ARK_PROXY_URL，直接进入直连模式
+  const [arkDirectMode, setArkDirectMode] = useState(Boolean(ARK_PROXY_URL));
+  const [arkSending, setArkSending] = useState(false);
+
   const sendMessageMutation = trpc.chat.sendMessage.useMutation({
     onSuccess: (data) => {
       setMessages((prev) => [
@@ -89,10 +111,37 @@ export default function Cockpit() {
       }
     },
     onError: (error) => {
-      toast.error("发送消息失败: " + error.message);
+      // tRPC 后端不可用时自动切换到 Ark 直连模式
+      console.warn("[Cockpit] tRPC 失败，切换到 Ark 直连模式:", error.message);
+      setArkDirectMode(true);
+      toast.info("已切换到 Ark LLM 直连模式");
       notifyIdle();
     },
   });
+
+  /** Ark 直连模式发送消息 */
+  const sendViaArkProxy = async (userMessage: string) => {
+    setArkSending(true);
+    notifyThinking();
+    try {
+      const data = await callArkProxy(userMessage, String(currentSessionId ?? "default"));
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: data.response },
+      ]);
+      // 解析情感标签并分发到舞台事件总线
+      const parsed = parseEmotionTags(data.response);
+      if (parsed.tags.length > 0) {
+        dispatchStageEventsFromTags(parsed.tags);
+      }
+      notifyIdle();
+    } catch (err: any) {
+      toast.error("Ark LLM 调用失败: " + err.message);
+      notifyIdle();
+    } finally {
+      setArkSending(false);
+    }
+  };
 
   const createSessionMutation = trpc.chat.createSession.useMutation({
     onSuccess: (session) => {
@@ -156,17 +205,24 @@ export default function Cockpit() {
   // ==================== 事件处理 ====================
 
   const handleSend = () => {
-    if (!message.trim() || sendMessageMutation.isPending) return;
+    const isPending = arkDirectMode ? arkSending : sendMessageMutation.isPending;
+    if (!message.trim() || isPending) return;
     const userMessage = message.trim();
     setMessage("");
     setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
-    // 通知舞台进入 thinking 状态
-    notifyThinking();
-    sendMessageMutation.mutate({
-      message: userMessage,
-      sessionId: currentSessionId ?? undefined,
-      characterId,
-    });
+
+    if (arkDirectMode) {
+      // Ark 直连模式
+      sendViaArkProxy(userMessage);
+    } else {
+      // 通知舞台进入 thinking 状态
+      notifyThinking();
+      sendMessageMutation.mutate({
+        message: userMessage,
+        sessionId: currentSessionId ?? undefined,
+        characterId,
+      });
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -364,7 +420,7 @@ export default function Cockpit() {
       <div className="absolute top-20 right-5 bottom-[200px] w-[380px] z-30">
         <AssistantPanel
           messages={messages}
-          isPending={sendMessageMutation.isPending}
+          isPending={arkDirectMode ? arkSending : sendMessageMutation.isPending}
           characterId={characterId}
           onCharacterChange={setCharacterId}
           onSynthesizeAssistantTts={handleSynthesizeAssistantTts}
