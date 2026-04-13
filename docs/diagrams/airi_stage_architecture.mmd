@@ -1,0 +1,37 @@
+graph TD
+    subgraph Cockpit UI ["车机中控界面 (Cockpit)"]
+        A[AssistantPanel] -->|文本/标签| B(emotionParser)
+        A -->|TTS音频| C(TtsPlayback)
+        D[AiriStageContainer] -->|渲染| E(Live2D Model)
+        F[BridgeStatusPanel] -->|状态展示| G(airi.* tRPC)
+    end
+
+    subgraph Stage Event Bus ["舞台事件总线 (mitt)"]
+        H((EventBus))
+    end
+
+    subgraph Stage Drivers ["舞台驱动层 (Zustand)"]
+        I[ExpressionDriver]
+        J[MotionDriver]
+        K[LipsyncDriver]
+        L[IdleStateManager]
+    end
+
+    B -->|解析出表情/动作| H
+    C -->|音频播放状态/电平| H
+    
+    H -->|expression事件| I
+    H -->|motion事件| J
+    H -->|tts_lipsync事件| K
+    H -->|idle_state事件| L
+    
+    I -->|设置表情参数| E
+    J -->|播放动作组| E
+    K -->|设置口型参数| E
+    L -->|播放闲置动画| E
+
+    subgraph Backend ["SmartAgent4 后端"]
+        M[chat.sendMessage] -->|返回带标签文本| A
+        N[airiBridgeService] -.->|WebSocket| O[AIRI Server]
+        G -->|查询/控制| N
+    end
