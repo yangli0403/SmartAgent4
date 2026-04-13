@@ -2,7 +2,7 @@
 
 > 本文件是 SmartAgent4 项目的**高层架构浓缩版**，专为 AI 编程助手设计。
 > 在每次代码分析或优化对话开始时，请优先阅读本文件以快速建立项目全局视角。
-> **最后更新：** 2026-04-07（第七轮迭代 — 记忆系统优化：Embedding + 智能检索 + 质量门控）
+> **最后更新：** 2026-04-13（第八轮迭代 — AIRI 前端角色舞台集成：Live2D + 事件驱动 + 状态机）
 
 ---
 
@@ -14,19 +14,50 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 
 | 层级 | 技术 |
 |------|------|
-| 前端 | React 19 + TypeScript + Vite 7 + TailwindCSS 4 |
+| 前端 | React 19 + TypeScript + Vite 7 + TailwindCSS 4 + **PixiJS 7 + Live2D** |
 | 后端 | Node.js + Express + tRPC 11 |
 | AI 框架 | LangGraph (StateGraph) + LangChain |
 | LLM | Manus API (gpt-4.1-mini) + Volcengine ARK (DeepSeek) 双轨 |
 | Embedding | 阿里云百炼 DashScope `text-embedding-v3` (1024维) / OpenAI 兼容 |
 | 数据库 | **PostgreSQL 16** (Drizzle ORM + postgres.js 驱动) |
 | Agent 发现 | Agent Card JSON + AgentCardRegistry + Zod 校验 |
-| 情感渲染 | Emotions-Express Python 微服务 (HTTP API) |
+| 情感渲染 | Emotions-Express (后端) + **AIRI Stage (前端 Live2D 舞台)** |
 | 工具集成 | MCP (Model Context Protocol) |
-| 测试 | Vitest 2 + @vitest/coverage-v8 |
+| 测试 | Vitest 2 + @vitest/coverage-v8 + **jsdom (前端组件测试)** |
 | 包管理 | pnpm 10 |
 
-## 3. 核心对话处理管线
+## 3. AIRI 前端角色舞台（第八轮迭代新增）
+
+基于 PixiJS 和 pixi-live2d-display 构建的非侵入式前端渲染层，通过事件总线与现有 UI 解耦。
+
+### 3.1 架构与数据流
+
+```
+[后端 AI 回复] → (包含 [emotion:happy] 等标签)
+       ↓
+[前端 emotionParser] → 提取纯文本 + 标签数组
+       ↓
+[StageEventBus] → 将标签转换为标准舞台事件 (expression, motion, tts_start 等)
+       ↓
+[Zustand Store] ← 集中管理所有舞台状态 (当前表情、动作优先级、口型电平、闲置状态)
+       ↓
+[驱动器 Hooks] → 监听事件/状态，调用 Live2D 模型 API
+  ├─ useExpressionDriver (平滑插值更新参数)
+  ├─ useMotionDriver (优先级打断播放动作)
+  ├─ useLipsyncDriver (Web Audio 音量映射口型)
+  └─ useIdleManager (闲置超时自动呼吸/眨眼)
+```
+
+### 3.2 核心组件
+
+| 模块 | 文件路径 | 职责 |
+|------|---------|------|
+| **AiriStageContainer** | `client/src/components/airi-stage/AiriStageContainer.tsx` | 承载 Live2D 画布，管理模型加载与自适应缩放，集成所有驱动器 |
+| **StageEventBus** | `client/src/lib/airi-stage/stageEventBus.ts` | 基于 mitt 的轻量级事件总线，解耦 UI 与驱动层 |
+| **useStageStore** | `client/src/lib/airi-stage/useStageStore.ts` | Zustand 状态机，管理表情过渡、动作优先级、口型和闲置状态 |
+| **驱动器 Hooks** | `client/src/hooks/use*Driver.ts` | 桥接 Store 状态与 Live2D 底层 API (`setParameterValueById`, `motion`) |
+
+## 4. 核心对话处理管线
 
 ```
 用户消息
@@ -58,7 +89,7 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 
 图定义入口：`server/agent/supervisor/supervisorGraph.ts` → `buildSupervisorGraph()`
 
-## 4. 主动记忆引擎（第四轮迭代新增）
+## 5. 主动记忆引擎（第四轮迭代新增）
 
 基于 memU 理念，系统从"被动响应"升级为具备"主动预测"能力的 24/7 全天候助理。
 
@@ -83,7 +114,7 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 | Prefetch Cache | `server/memory/prefetchCache.ts` | 内存级 LRU + TTL 缓存，存储预取好的记忆上下文。 |
 | Memory Cron | `server/memory/memoryCron.ts` | 后台调度器，新增 `PREDICTION_INTERVAL` (默认 2h) 触发预测周期。 |
 
-## 5. 多智能体协同架构（第三轮/第五轮迭代增强）
+## 6. 多智能体协同架构（第三轮/第五轮迭代增强）
 
 ### 5.1 Agent Card 动态发现
 
@@ -98,7 +129,7 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 - **事件驱动通知**：支持 `async=true` 异步委托，子代理完成后通过 `AgentEventBus` 发布 `TaskCompleted` 事件，替代硬阻塞的 `Promise.all`。
 - 委托深度限制为 3 层（`MAX_DELEGATE_DEPTH = 3`）。
 
-## 6. 三层记忆系统
+## 7. 三层记忆系统
 
 ### 6.1 架构
 
@@ -168,11 +199,11 @@ DreamGatekeeper → [backfillExtraction] LLM 回溯提取 + 去重
 | `memoryExtractionNode.ts` | 行为检测从自动提取流程中解耦，基于对话计数器独立触发 |
 | `hybridSearch.ts` | 向量不可用时自动回退到纯 BM25，动态调整 alpha 权重 |
 
-## 7. 自进化闭环
+## 8. 自进化闭环
 
 工具调用 → `reflectionNode` 异步分析 → `ToolRegistry.updateUtility()` (EMA 算法) → `tool_utility_logs` 表持久化 → LLM 反思生成 Prompt 补丁 → `prompt_versions` 表版本控制。
 
-## 8. 数据库 Schema
+## 9. 数据库 Schema
 
 定义在 `drizzle/schema.ts`，使用 **PostgreSQL** (pg-core)：
 
@@ -188,17 +219,17 @@ DreamGatekeeper → [backfillExtraction] LLM 回溯提取 + 去重
 | `tool_utility_logs` | 工具调用效用日志 |
 | `prompt_versions` | Prompt 版本历史（自进化闭环） |
 
-## 9. 测试
+## 10. 测试
 
 - **框架**：Vitest 2
 - **配置**：`vitest.config.ts`
 - **运行**：`pnpm test` 或 `npx vitest run`
 - **覆盖率**：`npx vitest run --coverage`
-- **现状**：654 个测试（651 通过，3 个需数据库），含第七轮迭代新增的 116 个记忆优化测试。
-- **新增模块覆盖率**：语句 94.3%，函数 97.6%。
-- **全量测试文档**：`TESTING.md`（含用户验收测试清单和覆盖率报告）。
+- **现状**：后端 654 个测试，前端新增 71 个 AIRI 舞台测试（全部通过）。
+- **新增模块覆盖率**：AIRI 核心库（`lib/airi-stage`）语句/分支/函数 100%。
+- **全量测试文档**：`TESTING.md` (后端) / `docs/TESTING_AIRI_STAGE.md` (前端)。
 
-## 10. 开发约定
+## 11. 开发约定
 
 1. **新增 Domain Agent**：创建 `agent-cards/xxxAgent.json` → 继承 `BaseAgent` → `smartAgentApp.ts` 自动加载和绑定
 2. **新增人格**：在 `server/personality/characters/` 中添加 JSON 配置
@@ -206,13 +237,14 @@ DreamGatekeeper → [backfillExtraction] LLM 回溯提取 + 去重
 4. **异步副作用**：后置任务一律使用 fire-and-forget 模式（如 `memoryExtractionNode`, `behaviorDetector`）
 5. **数据库迁移**：`pnpm db:push`（Drizzle ORM → PostgreSQL）
 
-## 11. 待办事项
+## 12. 待办事项
 
 - [ ] 闭合自进化反馈回路：classifyNode 消费工具效用分数
 - [x] ~~引入向量语义检索~~（第七轮已实现，应用层余弦相似度，未使用 pgvector）
 - [ ] 迁移到 pgvector 扩展，将向量检索下沉到数据库层
 - [ ] 引入 Apache AGE 图记忆
-- [ ] AIRI Bridge 流式输出（边说边动）实现
+- [x] ~~AIRI 前端角色舞台集成~~（第八轮已实现）
+- [ ] AIRI Bridge 流式输出（边说边动）与前端舞台的深度结合
 - [ ] 探索更小、更快的本地模型（如 Llama-3-8B）用于后台预测任务，降低 Token 成本
 - [ ] 实现事件驱动的预取缓存失效机制（目前仅依赖 TTL）
 
