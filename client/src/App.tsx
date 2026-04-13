@@ -8,6 +8,7 @@ import Cockpit from "./pages/Cockpit";
 import Chat from "./pages/Chat";
 import Memories from "./pages/Memories";
 import Settings from "./pages/Settings";
+import AiriDemo from "./pages/AiriDemo";
 
 function Router() {
   return (
@@ -16,6 +17,7 @@ function Router() {
       <Route path={"/chat"} component={Chat} />
       <Route path={"/memories"} component={Memories} />
       <Route path={"/settings"} component={Settings} />
+      <Route path={"/airi-demo"} component={AiriDemo} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
     </Switch>
