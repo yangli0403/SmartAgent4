@@ -13,6 +13,7 @@
  */
 
 import { StateGraph, START, END } from "@langchain/langgraph";
+import { traceable } from "langsmith/traceable";
 import { SupervisorState, type UserContext } from "./state";
 import { classifyNode, routeByComplexity } from "./classifyNode";
 import { planNode } from "./planNode";
@@ -147,9 +148,11 @@ export interface SupervisorOutput {
 }
 
 /**
- * 运行 Supervisor 图
+ * 运行 Supervisor 图（带 LangSmith 追踪）
  *
  * 将外部输入转换为 LangGraph 状态，执行图，提取输出。
+ * traceable 包装会在 LangSmith 中生成 "Supervisor_Run" Span，
+ * 包含整个 Supervisor 图的执行过程、节点流转和最终结果。
  *
  * V2 增强：支持 IAgentCardRegistry 和旧 AgentRegistry 两种注册表。
  *
@@ -157,7 +160,8 @@ export interface SupervisorOutput {
  * @param agentSource - Agent 来源（新注册表或旧注册表）
  * @returns Supervisor 输出
  */
-export async function runSupervisor(
+export const runSupervisor = traceable(
+  async function runSupervisor(
   input: SupervisorInput,
   agentSource: IAgentCardRegistry | AgentRegistry
 ): Promise<SupervisorOutput> {
@@ -265,4 +269,6 @@ export async function runSupervisor(
       characterId,
     };
   }
-}
+},
+  { name: "Supervisor_Run", run_type: "chain" }
+);

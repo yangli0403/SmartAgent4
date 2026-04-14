@@ -6,6 +6,9 @@
  * 有依赖的步骤等待前置完成后再执行。
  *
  * 替代原有 executeNode.ts 中的串行遍历逻辑。
+ *
+ * LangSmith 集成：
+ * - executeStep 使用 traceable 包装，每个步骤在 Trace 树中生成独立的 Span
  */
 
 import type {
@@ -22,6 +25,7 @@ import type {
 } from "../supervisor/state";
 import type { DomainAgentInterface, AgentExecutionInput } from "../domains/types";
 import { HumanMessage } from "@langchain/core/messages";
+import { traceable } from "langsmith/traceable";
 
 // ==================== DAG 分析器 ====================
 
@@ -197,11 +201,14 @@ export function createParallelExecuteNode(registry: IAgentCardRegistry) {
 // ==================== 单步执行辅助函数 ====================
 
 /**
- * 执行单个步骤
+ * 执行单个步骤（带 LangSmith 追踪）
  *
  * 从 AgentCardRegistry 获取 Agent 实例，构建输入，调用 execute()。
+ * traceable 包装会在 LangSmith 中为每个步骤生成独立的 Span，
+ * 包含目标 Agent、步骤描述、执行结果等信息。
  */
-async function executeStep(
+const executeStep = traceable(
+  async function executeStep(
   step: PlanStep,
   registry: IAgentCardRegistry,
   userMessage: string,
@@ -275,7 +282,9 @@ async function executeStep(
       toolCalls: [],
     };
   }
-}
+},
+  { name: "ParallelExecute_Step", run_type: "chain" }
+);
 
 /**
  * 解析 inputMapping

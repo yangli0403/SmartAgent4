@@ -11,8 +11,13 @@
  * - 使用 AgentCardRegistry 替代硬编码 agentRegistry
  * - 自动扫描 agent-cards/ 目录加载 Agent Card
  * - 为每个 Agent 注入 AgentCardRegistry 引用（支持委托协议）
+ *
+ * LangSmith 集成：
+ * - chat() 方法使用 traceable 包装，作为整个 Trace 树的根节点（Root Span）
+ * - 记录用户消息、会话信息、平台等元数据
  */
 
+import { traceable } from "langsmith/traceable";
 import { ToolRegistry } from "../mcp/toolRegistry";
 import { MCPManager } from "../mcp/mcpManager";
 import { loadMCPConfig } from "../mcp/mcpConfig";
@@ -263,11 +268,14 @@ export class SmartAgentApp {
   }
 
   /**
-   * 处理用户消息
+   * 处理用户消息（带 LangSmith 追踪）
    *
    * 核心 chat 接口，接收用户消息，通过 Supervisor 图处理并返回结果。
+   * traceable 包装会在 LangSmith 中生成一个名为 "SmartAgent_Chat" 的根 Span，
+   * 所有后续的 Supervisor 节点、Agent 执行、LLM 调用都会作为子 Span 嵌套其下。
    */
-  async chat(
+  chat = traceable(
+    async (
     userMessage: string,
     options: {
       userId: string;
@@ -277,7 +285,7 @@ export class SmartAgentApp {
       /** SmartAgent3 新增：人格 ID */
       characterId?: string;
     }
-  ): Promise<SupervisorOutput> {
+  ): Promise<SupervisorOutput> => {
     if (!this.initialized) {
       throw new Error(
         "[SmartAgentApp] Not initialized. Call initialize() first."
@@ -315,7 +323,9 @@ export class SmartAgentApp {
 
     // 运行 Supervisor（使用 AgentCardRegistry）
     return runSupervisor(input, this.agentCardRegistry);
-  }
+  },
+    { name: "SmartAgent_Chat", run_type: "chain" }
+  );
 
   /**
    * 更新用户位置

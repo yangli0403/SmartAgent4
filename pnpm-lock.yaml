@@ -178,6 +178,9 @@ importers:
       jose:
         specifier: 6.1.0
         version: 6.1.0
+      langsmith:
+        specifier: ^0.5.18
+        version: 0.5.18(openai@6.34.0(ws@8.20.0)(zod@4.3.6))(ws@8.20.0)
       lucide-react:
         specifier: ^0.453.0
         version: 0.453.0(react@19.2.5)

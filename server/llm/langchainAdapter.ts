@@ -3,9 +3,15 @@
  *
  * 优先使用 Manus 内置 LLM API（OpenAI 兼容协议），
  * 若未配置则回退到 Volcengine ARK API。
+ *
+ * LangSmith 集成：
+ * - ChatOpenAI 实例在 LANGSMITH_TRACING=true 时自动上报追踪
+ * - callLLMStructured / callLLMText / callLLMWithTools 使用 traceable 包装
+ *   以确保非 LangChain 路径的 LLM 调用也被完整追踪
  */
 
 import { ChatOpenAI } from "@langchain/openai";
+import { traceable } from "langsmith/traceable";
 
 // ==================== OpenAI 兼容 LLM 配置（优先） ====================
 
@@ -61,6 +67,8 @@ export interface LLMAdapterOptions {
  * 使用 @langchain/openai 的 ChatOpenAI，配置 ARK API 的 baseURL。
  * 返回的实例支持 .bindTools()、.invoke()、.stream() 等 LangGraph 标准方法。
  *
+ * 当 LANGSMITH_TRACING=true 时，ChatOpenAI 的所有调用会自动上报到 LangSmith。
+ *
  * @param options - 配置选项
  * @returns ChatOpenAI 实例
  */
@@ -96,7 +104,7 @@ export function createToolCallingLLM(
 // ==================== 结构化输出 ====================
 
 /**
- * 使用 LLM 生成结构化 JSON 输出
+ * 使用 LLM 生成结构化 JSON 输出（带 LangSmith 追踪）
  *
  * 通过在 system prompt 中嵌入 JSON Schema 说明，
  * 引导 LLM 输出符合预期格式的 JSON。
@@ -106,70 +114,76 @@ export function createToolCallingLLM(
  * @param options - LLM 配置选项
  * @returns 解析后的 JSON 对象
  */
-export async function callLLMStructured<T>(
-  systemPrompt: string,
-  userMessage: string,
-  options: LLMAdapterOptions = {}
-): Promise<T> {
-  const llm = createLLM({ temperature: 0.2, ...options });
+export const callLLMStructured = traceable(
+  async function callLLMStructured<T>(
+    systemPrompt: string,
+    userMessage: string,
+    options: LLMAdapterOptions = {}
+  ): Promise<T> {
+    const llm = createLLM({ temperature: 0.2, ...options });
 
-  const response = await llm.invoke([
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userMessage },
-  ]);
+    const response = await llm.invoke([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ]);
 
-  const content =
-    typeof response.content === "string"
-      ? response.content
-      : JSON.stringify(response.content);
+    const content =
+      typeof response.content === "string"
+        ? response.content
+        : JSON.stringify(response.content);
 
-  // 提取 JSON（支持 ```json ... ``` 包裹格式）
-  const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) ||
-    content.match(/\{[\s\S]*\}/);
+    // 提取 JSON（支持 ```json ... ``` 包裹格式）
+    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) ||
+      content.match(/\{[\s\S]*\}/);
 
-  if (!jsonMatch) {
-    throw new Error(
-      `[LangChainAdapter] Failed to extract JSON from LLM response: ${content.substring(0, 200)}`
-    );
-  }
+    if (!jsonMatch) {
+      throw new Error(
+        `[LangChainAdapter] Failed to extract JSON from LLM response: ${content.substring(0, 200)}`
+      );
+    }
 
-  const jsonStr = jsonMatch[1] || jsonMatch[0];
+    const jsonStr = jsonMatch[1] || jsonMatch[0];
 
-  try {
-    return JSON.parse(jsonStr) as T;
-  } catch (e) {
-    throw new Error(
-      `[LangChainAdapter] Failed to parse JSON: ${(e as Error).message}\nRaw: ${jsonStr.substring(0, 200)}`
-    );
-  }
-}
+    try {
+      return JSON.parse(jsonStr) as T;
+    } catch (e) {
+      throw new Error(
+        `[LangChainAdapter] Failed to parse JSON: ${(e as Error).message}\nRaw: ${jsonStr.substring(0, 200)}`
+      );
+    }
+  },
+  { name: "callLLMStructured", run_type: "llm" }
+);
 
 // ==================== 纯文本调用 ====================
 
 /**
- * 使用 LLM 生成纯文本回复
+ * 使用 LLM 生成纯文本回复（带 LangSmith 追踪）
  *
  * @param systemPrompt - 系统提示词
  * @param userMessage - 用户消息
  * @param options - LLM 配置选项
  * @returns 纯文本回复
  */
-export async function callLLMText(
-  systemPrompt: string,
-  userMessage: string,
-  options: LLMAdapterOptions = {}
-): Promise<string> {
-  const llm = createLLM(options);
+export const callLLMText = traceable(
+  async function callLLMText(
+    systemPrompt: string,
+    userMessage: string,
+    options: LLMAdapterOptions = {}
+  ): Promise<string> {
+    const llm = createLLM(options);
 
-  const response = await llm.invoke([
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userMessage },
-  ]);
+    const response = await llm.invoke([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ]);
 
-  return typeof response.content === "string"
-    ? response.content
-    : JSON.stringify(response.content);
-}
+    return typeof response.content === "string"
+      ? response.content
+      : JSON.stringify(response.content);
+  },
+  { name: "callLLMText", run_type: "llm" }
+);
 
 // ==================== 直接调用（兼容旧接口） ====================
 
@@ -218,64 +232,67 @@ export interface LLMResponseWithTools {
 }
 
 /**
- * 带 function calling 支持的 LLM 调用
+ * 带 function calling 支持的 LLM 调用（带 LangSmith 追踪）
  *
  * @param request - 请求参数
  * @returns LLM 响应（含 tool_calls）
  */
-export async function callLLMWithTools(
-  request: LLMRequestWithTools
-): Promise<LLMResponseWithTools> {
-  const allMessages = [
-    { role: "system" as const, content: request.systemPrompt },
-    ...request.messages,
-  ];
+export const callLLMWithTools = traceable(
+  async function callLLMWithTools(
+    request: LLMRequestWithTools
+  ): Promise<LLMResponseWithTools> {
+    const allMessages = [
+      { role: "system" as const, content: request.systemPrompt },
+      ...request.messages,
+    ];
 
-  const body: Record<string, unknown> = {
-    model: DEFAULT_MODEL,
-    messages: allMessages,
-    temperature: request.temperature ?? 0.7,
-    max_tokens: request.maxTokens ?? 2000,
-  };
+    const body: Record<string, unknown> = {
+      model: DEFAULT_MODEL,
+      messages: allMessages,
+      temperature: request.temperature ?? 0.7,
+      max_tokens: request.maxTokens ?? 2000,
+    };
 
-  if (request.tools && request.tools.length > 0) {
-    body.tools = request.tools;
-    body.tool_choice = request.tool_choice ?? "auto";
-  }
-
-  try {
-    const response = await fetch(`${ACTIVE_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${ACTIVE_API_KEY}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `[LangChainAdapter] LLM API error: ${response.status} - ${errorText}`
-      );
+    if (request.tools && request.tools.length > 0) {
+      body.tools = request.tools;
+      body.tool_choice = request.tool_choice ?? "auto";
     }
 
-    const data = await response.json();
-    const choice = data.choices?.[0]?.message;
+    try {
+      const response = await fetch(`${ACTIVE_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${ACTIVE_API_KEY}`,
+        },
+        body: JSON.stringify(body),
+      });
 
-    return {
-      content: choice?.content || null,
-      tool_calls: choice?.tool_calls || undefined,
-      usage: data.usage
-        ? {
-            prompt_tokens: data.usage.prompt_tokens || 0,
-            completion_tokens: data.usage.completion_tokens || 0,
-            total_tokens: data.usage.total_tokens || 0,
-          }
-        : undefined,
-    };
-  } catch (error) {
-    console.error("[LangChainAdapter] Error calling LLM with tools:", error);
-    throw error;
-  }
-}
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `[LangChainAdapter] LLM API error: ${response.status} - ${errorText}`
+        );
+      }
+
+      const data = await response.json();
+      const choice = data.choices?.[0]?.message;
+
+      return {
+        content: choice?.content || null,
+        tool_calls: choice?.tool_calls || undefined,
+        usage: data.usage
+          ? {
+              prompt_tokens: data.usage.prompt_tokens || 0,
+              completion_tokens: data.usage.completion_tokens || 0,
+              total_tokens: data.usage.total_tokens || 0,
+            }
+          : undefined,
+      };
+    } catch (error) {
+      console.error("[LangChainAdapter] Error calling LLM with tools:", error);
+      throw error;
+    }
+  },
+  { name: "callLLMWithTools", run_type: "llm" }
+);

@@ -7,6 +7,9 @@
  * V2 增强：
  * - 注入 AgentCardRegistry 引用，支持运行时 Agent 发现
  * - 新增 delegate() 方法，支持 Agent 间委托协议
+ *
+ * LangSmith 集成：
+ * - execute() 和 delegate() 方法使用 traceable 包装，在 Trace 树中生成独立的 Agent 执行 Span
  */
 
 import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
@@ -20,6 +23,7 @@ import {
 } from "@langchain/core/messages";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
+import { traceable } from "langsmith/traceable";
 import { createToolCallingLLM } from "../../llm/langchainAdapter";
 import type { MCPManager } from "../../mcp/mcpManager";
 import type {
@@ -150,7 +154,7 @@ export abstract class BaseAgent implements DomainAgentInterface {
   }
 
   /**
-   * 委托子任务给其他 Agent
+   * 委托子任务给其他 Agent（带 LangSmith 追踪）
    *
    * 当前 Agent 在执行过程中发现能力不足时，可以通过此方法
    * 查找具有所需能力的其他 Agent 并委托子任务。
@@ -158,7 +162,14 @@ export abstract class BaseAgent implements DomainAgentInterface {
    * @param request - 委托请求
    * @returns 委托结果
    */
-  async delegate(request: DelegateRequest): Promise<DelegateResult> {
+  delegate = traceable(
+    async (request: DelegateRequest): Promise<DelegateResult> => {
+      return this._delegateImpl(request);
+    },
+    { name: "Agent_Delegate", run_type: "chain" }
+  );
+
+  private async _delegateImpl(request: DelegateRequest): Promise<DelegateResult> {
     const depth = request.depth || 0;
 
     // 1. 检查委托深度
@@ -274,11 +285,21 @@ export abstract class BaseAgent implements DomainAgentInterface {
   }
 
   /**
-   * 执行任务步骤
+   * 执行任务步骤（带 LangSmith 追踪）
    *
    * 构建 ReACT Agent 图，运行循环直到 LLM 不再请求工具调用或达到最大迭代次数。
+   *
+   * traceable 包装会在 LangSmith 中生成一个以 Agent 名称命名的 Span，
+   * 包含输入的任务描述、输出结果、工具调用记录和执行时间。
    */
-  async execute(input: AgentExecutionInput): Promise<AgentExecutionOutput> {
+  execute = traceable(
+    async (input: AgentExecutionInput): Promise<AgentExecutionOutput> => {
+      return this._executeImpl(input);
+    },
+    { name: "DomainAgent_Execute", run_type: "chain" }
+  );
+
+  private async _executeImpl(input: AgentExecutionInput): Promise<AgentExecutionOutput> {
     const startTime = Date.now();
     const toolCallRecords: ToolCallRecord[] = [];
 
