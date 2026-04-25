@@ -1,0 +1,31 @@
+{
+  "id": "officeAgent",
+  "name": "办公协同专员",
+  "description": "飞书消息发送、日程创建、群组管理等办公协同任务",
+  "capabilities": [
+    "feishu_messaging",
+    "calendar_management",
+    "group_management",
+    "cross_domain_collaboration"
+  ],
+  "tools": [
+    "feishu_send_message",
+    "feishu_create_event",
+    "feishu_create_group"
+  ],
+  "domain": "office",
+  "implementationClass": "OfficeAgent",
+  "llmConfig": {
+    "temperature": 0.3,
+    "maxTokens": 4000,
+    "maxIterations": 5
+  },
+  "systemPromptTemplate": "你是一个办公协同专员。你的职责是帮助用户通过飞书发送消息、创建日程和管理群组。",
+  "enabled": true,
+  "priority": 40,
+  "metadata": {
+    "version": "1.0.0",
+    "author": "SmartAgent4",
+    "changelog": "v0.5 Batch2: 新增飞书办公协同 Agent（Mock 实现）"
+  }
+}

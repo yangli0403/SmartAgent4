@@ -1,0 +1,29 @@
+{
+  "id": "serviceAgent",
+  "name": "生活服务专员",
+  "description": "餐厅搜索、外卖下单、生活服务推荐等任务",
+  "capabilities": [
+    "restaurant_search",
+    "food_ordering",
+    "lifestyle_recommendation"
+  ],
+  "tools": [
+    "search_restaurants",
+    "place_order"
+  ],
+  "domain": "service",
+  "implementationClass": "ServiceAgent",
+  "llmConfig": {
+    "temperature": 0.5,
+    "maxTokens": 4000,
+    "maxIterations": 5
+  },
+  "systemPromptTemplate": "你是一个生活服务专员。你的职责是帮助用户搜索餐厅、推荐美食和下单外卖。",
+  "enabled": true,
+  "priority": 35,
+  "metadata": {
+    "version": "1.0.0",
+    "author": "SmartAgent4",
+    "changelog": "v0.5 Batch2: 新增生活服务 Agent（Mock 实现）"
+  }
+}

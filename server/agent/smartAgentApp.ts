@@ -29,6 +29,10 @@ import { GeneralAgent } from "./domains/generalAgent";
 import { registerFreeWeatherTools } from "../mcp/freeWeatherTools";
 import { registerFileOrganizerTools } from "../mcp/fileOrganizerRegistration";
 import { registerMemoryTools } from "./tools/memoryTools";
+import { registerNewsTools } from "./tools/newsTools";
+import { registerFeishuTools } from "./tools/feishuTools";
+import { registerItineraryTools } from "./tools/itineraryTools";
+import { registerServiceTools } from "./tools/serviceTools";
 import {
   runSupervisor,
   type SupervisorInput,
@@ -57,6 +61,8 @@ const AGENT_MODULE_LOADERS: Record<string, () => Promise<unknown>> = {
   NavigationAgent: () => import("./domains/navigationAgent.js"),
   MultimediaAgent: () => import("./domains/multimediaAgent.js"),
   GeneralAgent: () => import("./domains/generalAgent.js"),
+  OfficeAgent: () => import("./domains/officeAgent.js"),
+  ServiceAgent: () => import("./domains/serviceAgent.js"),
 };
 
 // ==================== 应用实例 ====================
@@ -122,6 +128,22 @@ export class SmartAgentApp {
     // 2.7 注册记忆技能工具（记忆系统技能化改造）
     registerMemoryTools(this.toolRegistry);
     console.log("[SmartAgentApp] Memory skill tools registered");
+
+    // 2.8 注册新闻资讯工具（v0.5 Batch2 新增）
+    registerNewsTools(this.toolRegistry);
+    console.log("[SmartAgentApp] News tools registered");
+
+    // 2.9 注册飞书办公协同工具（v0.5 Batch2 新增）
+    registerFeishuTools(this.toolRegistry);
+    console.log("[SmartAgentApp] Feishu office tools registered");
+
+    // 2.10 注册行程规划工具（v0.5 Batch2 新增）
+    registerItineraryTools(this.toolRegistry);
+    console.log("[SmartAgentApp] Itinerary tools registered");
+
+    // 2.11 注册生活服务工具（v0.5 Batch2 新增）
+    registerServiceTools(this.toolRegistry);
+    console.log("[SmartAgentApp] Service tools registered");
 
     // 3. 注入 MCP 工具调用能力到 Context Manager
     this.contextManager.setMCPCallTool(

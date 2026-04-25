@@ -36,8 +36,10 @@ export const CLASSIFY_SYSTEM_PROMPT = `你是一个任务分类专家。根据�
 - navigation: 用户**明确要求**导航、路径规划、地图查询、天气、POI 搜索等（如「怎么去」「规划路线」「导航到」）；**不要**把「仅陈述家住哪、公司在哪」判成导航
 - multimedia: 音乐搜索/播放、视频搜索、歌曲推荐、歌单管理等（**含「搜索/找 XX 的歌」「推荐歌手」等，勿判成 general**）
 - file_system: 文件搜索、打开、目录操作、复制/创建；**以及 C 盘/系统盘/磁盘空间/垃圾与临时文件体量分析**（须走 fileAgent 内置工具，勿判为 general）
+- office: 飞书消息发送、日程创建、群组管理、办公协同等（如「发飞书消息」「创建日程」「建个群」）
+- service: 餐厅搜索、外卖下单、生活服务推荐等（如「附近有什么好吃的」「帮我订外卖」「找川菜馆」）
 - general: 闲聊、知识问答、建议咨询、**仅同步住址/上班地等个人信息**（无导航意图）
-- cross_domain: 涉及多个领域的复合任务
+- cross_domain: 涉及多个领域的复合任务（如「帮我规划上海行程并发到飞书群」「找个餐厅然后帮我建个群约同事」）
 
 复杂度判断：
 - simple: 单步操作或简单问答，只需一个 Agent 即可完成
@@ -46,13 +48,15 @@ export const CLASSIFY_SYSTEM_PROMPT = `你是一个任务分类专家。根据�
 
 可用 Agent：
 - fileAgent: 文件系统操作
-- navigationAgent: 导航和地图操作
+- navigationAgent: 导航和地图操作、天气查询、行程规划
 - multimediaAgent: 音乐和多媒体操作
+- officeAgent: 飞书消息发送、日程创建、群组管理
+- serviceAgent: 餐厅搜索、外卖下单、生活服务
 - generalAgent: 通用对话和知识问答
 
 请以 JSON 格式输出（不要包含其他文字）：
 {
-  "domain": "navigation|multimedia|file_system|general|cross_domain",
+  "domain": "navigation|multimedia|file_system|office|service|general|cross_domain",
   "complexity": "simple|moderate|complex",
   "reasoning": "分类推理过程",
   "requiredAgents": ["需要调用的Agent列表"]
@@ -444,7 +448,7 @@ export function resolveAgentsForDomain(
   registry: IAgentCardRegistry
 ): string[] {
   if (domain === "cross_domain") {
-    const wanted = ["navigationAgent", "multimediaAgent", "fileAgent"];
+    const wanted = ["navigationAgent", "multimediaAgent", "fileAgent", "officeAgent", "serviceAgent"];
     return wanted.filter((id) => registry.has(id));
   }
 
@@ -460,6 +464,10 @@ export function resolveAgentsForDomain(
       return ["multimediaAgent"];
     case "file_system":
       return ["fileAgent"];
+    case "office":
+      return ["officeAgent"];
+    case "service":
+      return ["serviceAgent"];
     case "general":
       return ["generalAgent"];
     default:

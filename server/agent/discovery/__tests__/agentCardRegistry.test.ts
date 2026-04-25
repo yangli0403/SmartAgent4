@@ -363,12 +363,14 @@ describe("AgentCardRegistry", () => {
 
       await registry.loadFromDirectory(cardsDir);
 
-      // 应加载 4 个 Agent Card
-      expect(registry.size()).toBe(4);
+      // 应加载 6 个 Agent Card（原 4 + officeAgent + serviceAgent）
+      expect(registry.size()).toBe(6);
       expect(registry.has("fileAgent")).toBe(true);
       expect(registry.has("navigationAgent")).toBe(true);
       expect(registry.has("multimediaAgent")).toBe(true);
       expect(registry.has("generalAgent")).toBe(true);
+      expect(registry.has("officeAgent")).toBe(true);
+      expect(registry.has("serviceAgent")).toBe(true);
     });
 
     it("加载后的 Card 应通过 Zod Schema 校验", async () => {

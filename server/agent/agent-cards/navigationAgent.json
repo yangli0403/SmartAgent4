@@ -1,14 +1,15 @@
 {
   "id": "navigationAgent",
   "name": "导航出行专员",
-  "description": "POI搜索、周边搜索、路径规划（驾车/步行/骑行/公交）、地理编码、天气查询、IP定位、导航",
+  "description": "POI搜索、周边搜索、路径规划（驾车/步行/骑行/公交）、地理编码、天气查询、IP定位、导航、行程规划",
   "capabilities": [
     "poi_search",
     "route_planning",
     "geocoding",
     "weather_query",
     "ip_location",
-    "navigation"
+    "navigation",
+    "itinerary_planning"
   ],
   "tools": [
     "free_weather_by_city",
@@ -29,7 +30,8 @@
     "maps_search_detail",
     "maps_schema_personal_map",
     "maps_schema_navi",
-    "maps_schema_take_taxi"
+    "maps_schema_take_taxi",
+    "generate_itinerary"
   ],
   "domain": "navigation",
   "implementationClass": "NavigationAgent",

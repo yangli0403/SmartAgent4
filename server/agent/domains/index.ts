@@ -30,3 +30,5 @@ export { FileAgent, FILE_AGENT_CONFIG } from "./fileAgent";
 export { NavigationAgent, NAVIGATION_AGENT_CONFIG } from "./navigationAgent";
 export { MultimediaAgent, MULTIMEDIA_AGENT_CONFIG } from "./multimediaAgent";
 export { GeneralAgent, GENERAL_AGENT_CONFIG } from "./generalAgent";
+export { OfficeAgent, OFFICE_AGENT_CONFIG } from "./officeAgent";
+export { ServiceAgent, SERVICE_AGENT_CONFIG } from "./serviceAgent";

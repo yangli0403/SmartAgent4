@@ -14,6 +14,7 @@ import chatRouterEnhanced from "../routers/chatRouterEnhanced";
 import { startNeteaseMCPServer, NETEASE_MCP_PORT } from "../mcp/netease/index";
 import { attachAsrWebSocket } from "../asr/asrStreamSocket";
 import { createSupervisorSseRouter } from "../agent/supervisor/supervisorSseRouter";
+import { createOmniTokenRouter } from "../routers/omniTokenRouter";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -68,6 +69,8 @@ async function startServer() {
   app.use("/api/chat", chatRouterEnhanced);
   // v0.5: Supervisor 流式事件 SSE 端点（前端 ThinkingBubble 订阅）
   app.use(createSupervisorSseRouter());
+  // v0.5 Batch2: Omni 端到端语音模式 Token 端点
+  app.use(createOmniTokenRouter());
   // tRPC API
   app.use(
     "/api/trpc",
