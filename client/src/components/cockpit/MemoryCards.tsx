@@ -1,8 +1,8 @@
 /**
- * MemoryCards — 用户记忆卡片组件
+ * MemoryCards — 用户记忆卡片组件（暗色车机风格）
  *
- * 与会话管理卡片等宽等高（w-72 h-44），样式统一。
- * 白色半透明毛玻璃卡片，圆角，分类标签 + 记忆文本。
+ * 与会话管理卡片等宽等高（w-64 h-44），样式统一。
+ * 深色半透明毛玻璃卡片，圆角，分类标签 + 记忆文本。
  * 支持：实时刷新（每 3 秒轮询）、超出内容可上下滚动、手动触发记忆后台任务。
  */
 
@@ -17,19 +17,19 @@ const TYPE_BADGE: Record<
   string,
   { label: string; bgClass: string; textClass: string }
 > = {
-  fact: { label: "事实", bgClass: "bg-blue-500", textClass: "text-white" },
-  behavior: { label: "行为", bgClass: "bg-green-500", textClass: "text-white" },
-  preference: { label: "偏好", bgClass: "bg-pink-500", textClass: "text-white" },
-  emotion: { label: "情绪", bgClass: "bg-purple-500", textClass: "text-white" },
+  fact: { label: "事实", bgClass: "bg-blue-500/80", textClass: "text-white" },
+  behavior: { label: "行为", bgClass: "bg-green-500/80", textClass: "text-white" },
+  preference: { label: "偏好", bgClass: "bg-pink-500/80", textClass: "text-white" },
+  emotion: { label: "情绪", bgClass: "bg-purple-500/80", textClass: "text-white" },
 };
 
 const KIND_BADGE: Record<
   string,
   { label: string; bgClass: string; textClass: string }
 > = {
-  episodic: { label: "情景", bgClass: "bg-orange-500", textClass: "text-white" },
-  semantic: { label: "语义", bgClass: "bg-blue-500", textClass: "text-white" },
-  persona: { label: "人格", bgClass: "bg-purple-500", textClass: "text-white" },
+  episodic: { label: "情景", bgClass: "bg-orange-500/80", textClass: "text-white" },
+  semantic: { label: "语义", bgClass: "bg-blue-500/80", textClass: "text-white" },
+  persona: { label: "人格", bgClass: "bg-purple-500/80", textClass: "text-white" },
 };
 
 // ==================== 单条记忆行 ====================
@@ -43,7 +43,7 @@ function MemoryRow({
 }) {
   const badge = TYPE_BADGE[type] || KIND_BADGE[type] || {
     label: type,
-    bgClass: "bg-gray-500",
+    bgClass: "bg-gray-500/80",
     textClass: "text-white",
   };
 
@@ -54,7 +54,7 @@ function MemoryRow({
       >
         {badge.label}
       </span>
-      <p className="text-xs text-gray-600 leading-relaxed line-clamp-2">
+      <p className="text-xs text-white/60 leading-relaxed line-clamp-2">
         {content}
       </p>
     </div>
@@ -116,14 +116,14 @@ export default function MemoryCards() {
   });
 
   return (
-    <div className="w-72 h-44 bg-white/70 backdrop-blur-md rounded-2xl border border-white/50 shadow-sm p-4 flex flex-col">
+    <div className="w-64 h-44 bg-white/8 backdrop-blur-md rounded-2xl border border-white/10 p-4 flex flex-col">
       {/* 标题行 */}
       <div className="flex items-center gap-2 mb-2 shrink-0 w-full min-w-0">
-        <div className="w-2 h-2 rounded-full bg-gray-800 shrink-0" />
-        <span className="text-sm font-medium text-gray-700 shrink-0">用户记忆</span>
+        <div className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
+        <span className="text-sm font-medium text-white/80 shrink-0">用户记忆</span>
         <span className="flex-1 min-w-0" />
         {allMemories.length > 0 && (
-          <span className="text-[10px] text-gray-400 shrink-0">
+          <span className="text-[10px] text-white/40 shrink-0">
             {allMemories.length} 条
           </span>
         )}
@@ -133,7 +133,7 @@ export default function MemoryCards() {
             title="立即执行：记忆巩固、遗忘衰减、意图预测+预取、预取缓存过期清理（对应后台定时任务，便于调试）"
             disabled={runMaintenance.isPending}
             onClick={() => runMaintenance.mutate({ all: true })}
-            className="shrink-0 inline-flex items-center gap-0.5 rounded-full border border-gray-300/80 bg-white/90 px-2 py-0.5 text-[10px] text-gray-600 hover:bg-gray-50 hover:text-gray-800 disabled:opacity-50"
+            className="shrink-0 inline-flex items-center gap-0.5 rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[10px] text-white/60 hover:bg-white/20 hover:text-white/80 disabled:opacity-50"
           >
             {runMaintenance.isPending ? (
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -147,7 +147,7 @@ export default function MemoryCards() {
       <div className="flex-1 overflow-y-auto pr-0.5">
         {allMemories.length === 0 ? (
           <div className="flex items-center justify-center h-full">
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-white/30">
               暂无记忆，对话后自动积累
             </p>
           </div>

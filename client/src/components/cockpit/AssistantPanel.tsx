@@ -1,5 +1,5 @@
 /**
- * AssistantPanel — 助手反馈面板组件
+ * AssistantPanel — 助手反馈面板组件（暗色车机风格）
  *
  * 车机中控屏右侧面板，展示 AI 回复内容及情感标签可视化。
  * 输入框已移至顶部 ASR 区域，本组件仅负责消息列表展示。
@@ -68,7 +68,7 @@ function CharacterSelector({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1 text-xs text-gray-600 bg-white/80 border border-gray-200 rounded-lg px-2.5 py-1.5 cursor-pointer hover:bg-white transition-colors focus:outline-none focus:ring-1 focus:ring-gray-300"
+        className="flex items-center gap-1 text-xs text-white/70 bg-white/10 border border-white/15 rounded-lg px-2.5 py-1.5 cursor-pointer hover:bg-white/20 transition-colors focus:outline-none focus:ring-1 focus:ring-white/30"
       >
         <span>{current.emoji}</span>
         <span>{current.label}</span>
@@ -79,7 +79,7 @@ function CharacterSelector({
 
       {/* 下拉菜单 */}
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 bg-white rounded-lg border border-gray-200 shadow-lg py-1 min-w-[120px] z-50">
+        <div className="absolute right-0 top-full mt-1 bg-[#1e2d3d] rounded-lg border border-white/15 shadow-lg py-1 min-w-[120px] z-50">
           {CHARACTER_OPTIONS.map((opt) => (
             <button
               key={opt.id}
@@ -88,14 +88,14 @@ function CharacterSelector({
                 onChange(opt.id);
                 setIsOpen(false);
               }}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-gray-50 transition-colors ${
-                opt.id === characterId ? "bg-blue-50 text-blue-600 font-medium" : "text-gray-600"
+              className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-white/10 transition-colors ${
+                opt.id === characterId ? "bg-blue-500/20 text-blue-300 font-medium" : "text-white/70"
               }`}
             >
               <span className="text-sm">{opt.emoji}</span>
               <span>{opt.label}</span>
               {opt.id === characterId && (
-                <svg className="w-3 h-3 ml-auto text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                <svg className="w-3 h-3 ml-auto text-blue-400" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                 </svg>
               )}
@@ -112,11 +112,11 @@ function CharacterSelector({
 function EmotionBadge({ tag }: { tag: EmotionTag }) {
   return (
     <span
-      className="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-medium bg-white/80 border border-gray-200 shadow-sm"
+      className="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-medium bg-white/10 border border-white/15 shadow-sm"
       title={`${tag.type}: ${tag.value}`}
     >
       <span className="text-sm">{tag.emoji}</span>
-      <span className="text-gray-600">{tag.label}</span>
+      <span className="text-white/60">{tag.label}</span>
     </span>
   );
 }
@@ -132,11 +132,11 @@ function EmotionDisplay({ parsed }: { parsed: ParsedMessage }) {
       {parsed.primaryEmotion && (
         <div className="flex items-center gap-2">
           <span className="text-lg">{parsed.primaryEmotion.emoji}</span>
-          <span className="text-sm font-medium text-gray-700">
+          <span className="text-sm font-medium text-white/80">
             {parsed.primaryEmotion.label}
           </span>
           {parsed.actionCount > 0 && (
-            <span className="text-xs text-gray-400 ml-1">
+            <span className="text-xs text-white/40 ml-1">
               {parsed.actionCount} 个动作~
             </span>
           )}
@@ -171,13 +171,12 @@ function AssistantMessage({
   isSynthesizing?: boolean;
 }) {
   const parsed = parseEmotionTags(content);
-  const bgClass = getEmotionBgClass(parsed.primaryEmotion?.label || null);
 
   return (
-    <div className={`rounded-xl p-3 border ${bgClass} transition-colors`}>
+    <div className="rounded-xl p-3 bg-white/8 border border-white/10 backdrop-blur-sm transition-colors">
       {/* 文本内容 */}
-      <div className="text-sm text-gray-800 leading-relaxed">
-        <Streamdown className="prose prose-sm max-w-none break-words [&>p]:my-1">
+      <div className="text-sm text-white/85 leading-relaxed">
+        <Streamdown className="prose prose-sm prose-invert max-w-none break-words [&>p]:my-1">
           {parsed.cleanText}
         </Streamdown>
       </div>
@@ -209,9 +208,9 @@ function UserMessage({ content }: { content: string }) {
 
 function LoadingDots() {
   return (
-    <div className="rounded-xl p-3 bg-white border border-gray-200">
+    <div className="rounded-xl p-3 bg-white/8 border border-white/10">
       <div className="flex gap-1 items-center">
-        <span className="text-xs text-gray-400 mr-2">正在生成回复…</span>
+        <span className="text-xs text-white/40 mr-2">正在生成回复…</span>
         {[0, 150, 300].map((d) => (
           <div
             key={d}
@@ -245,13 +244,13 @@ export default function AssistantPanel({
   }, [messages, isPending]);
 
   return (
-    <div className="flex flex-col h-full bg-white/60 backdrop-blur-md rounded-2xl border border-white/50 shadow-sm overflow-hidden">
+    <div className="flex flex-col h-full bg-[#1a2a3a]/80 backdrop-blur-xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
       {/* 面板标题 */}
-      <div className="px-4 py-2.5 border-b border-white/30 shrink-0">
+      <div className="px-4 py-2.5 border-b border-white/10 shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          <span className="text-sm font-medium text-gray-700">智能助手</span>
-          {/* 人格切换下拉框（自定义实现，避免原生 select 事件兼容性问题） */}
+          <span className="text-sm font-medium text-white/80">智能助手</span>
+          {/* 人格切换下拉框 */}
           {onCharacterChange && (
             <CharacterSelector
               characterId={characterId}
@@ -267,8 +266,8 @@ export default function AssistantPanel({
           {recentMessages.length === 0 && !isPending && (
             <div className="text-center py-8">
               <div className="text-3xl mb-2">🚗</div>
-              <p className="text-sm text-gray-400">欢迎乘车，我是您的智能助手。</p>
-              <p className="text-xs text-gray-300 mt-1">
+              <p className="text-sm text-white/40">欢迎乘车，我是您的智能助手。</p>
+              <p className="text-xs text-white/25 mt-1">
                 请在顶部输入消息开始对话
               </p>
             </div>

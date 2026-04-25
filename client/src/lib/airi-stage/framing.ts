@@ -24,8 +24,8 @@ export interface FramingResult {
 
 /** halfBody 默认放大系数（让脚部裁出视口） */
 export const HALF_BODY_DEFAULT_SCALE_FACTOR = 1.6;
-/** fullBody 安全边距系数（与 v0.4 行为一致） */
-export const FULL_BODY_FIT_FACTOR = 0.85;
+/** fullBody 安全边距系数（调大以充分利用容器空间） */
+export const FULL_BODY_FIT_FACTOR = 0.95;
 
 /**
  * 根据视图模式与容器/模型尺寸计算 Live2D 渲染参数。
@@ -74,18 +74,21 @@ export function computeFraming(
     return {
       scale: baseFitScale,
       x: containerWidth / 2,
-      y: containerHeight * 0.92,
+      y: containerHeight * 0.95,
       anchorY: 1.0,
     };
   }
 
   // halfBody
   const factor = clampFactor(halfBodyOverride ?? HALF_BODY_DEFAULT_SCALE_FACTOR);
+  // y 值根据 factor 动态调整：factor 越大，模型越大，需要更多下移来裁掉下半身
+  // 公式：基础偏移 + factor 带来的额外偏移，确保头部始终在容器顶部可见
+  const yRatio = 0.55 + factor * 0.35;
   return {
     scale: baseFitScale * factor,
     x: containerWidth / 2,
-    y: containerHeight * 1.2,
-    anchorY: 1.0,
+    y: containerHeight * yRatio,
+    anchorY: 0.5,
   };
 }
 
