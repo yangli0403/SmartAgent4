@@ -14,7 +14,8 @@ import {
   type EmotionTag,
 } from "@/lib/emotionParser";
 import { Streamdown } from "streamdown";
-import type { ChatUiMessage } from "@shared/chatTts";
+import type { ChatUiMessage, ChatUiThinkingMessage } from "@shared/chatTts";
+import { ThinkingBubble } from "./ThinkingBubble";
 import { TtsPlayback } from "@/components/TtsPlayback";
 
 // ==================== 类型 ====================
@@ -291,6 +292,8 @@ export default function AssistantPanel({
                     }
                     isSynthesizing={synthesizingMessageIndex === idx}
                   />
+                ) : msg.role === "thinking" ? (
+                  <ThinkingBubble message={msg as ChatUiThinkingMessage} />
                 ) : (
                   <UserMessage content={msg.content} />
                 )}

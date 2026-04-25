@@ -118,6 +118,8 @@ export const appRouter = router({
           sessionId: z.number().nullable().optional(),
           /** SmartAgent3 新增：人格 ID */
           characterId: z.string().optional(),
+          /** v0.5 新增：可选流式请求 ID，启用 SSE 中间事件推送 */
+          requestId: z.string().min(1).optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -152,21 +154,25 @@ export const appRouter = router({
         if (smartAgentReady) {
           console.log("[Chat] 路由到 SmartAgentApp (Supervisor 架构)");
           try {
-            const supervisorResult = await getSmartAgentApp().chat(
-              input.message,
-              {
-                userId: String(userId),
-                sessionId: String(sessionId ?? userId),
-                conversationHistory,
-                platform:
-                  process.platform === "win32"
-                    ? "windows"
-                    : process.platform === "darwin"
-                      ? "mac"
-                      : "linux",
-                characterId: input.characterId || "xiaozhi",
-              }
-            );
+            const baseChatOpts = {
+              userId: String(userId),
+              sessionId: String(sessionId ?? userId),
+              conversationHistory,
+              platform:
+                process.platform === "win32"
+                  ? "windows"
+                  : process.platform === "darwin"
+                    ? "mac"
+                    : "linux",
+              characterId: input.characterId || "xiaozhi",
+            } as const;
+            // v0.5：提供 requestId 时走流式版本，事件经 SSE 推给前端 ThinkingBubble
+            const supervisorResult = input.requestId
+              ? await getSmartAgentApp().chatStreaming(input.message, {
+                  ...baseChatOpts,
+                  requestId: input.requestId,
+                })
+              : await getSmartAgentApp().chat(input.message, baseChatOpts);
             responseText = supervisorResult.response;
             agentDomain = supervisorResult.classification.domain;
             agentComplexity = supervisorResult.classification.complexity;

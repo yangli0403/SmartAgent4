@@ -14,6 +14,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { useState, useRef, useEffect } from "react";
+import { useSupervisorStream } from "@/hooks/useSupervisorStream";
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { getLoginUrl } from "@/const";
@@ -52,6 +53,21 @@ export default function Cockpit() {
 
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatUiMessage[]>([]);
+  // v0.5：当前活动的 thinking 请求 ID（用于 SSE 订阅）
+  const [activeRequestId, setActiveRequestId] = useState<string | undefined>(undefined);
+  const supervisorStream = useSupervisorStream(activeRequestId);
+
+  // v0.5：将流式中的 details 同步到对应 thinking 消息
+  useEffect(() => {
+    if (!activeRequestId) return;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.role === "thinking" && m.requestId === activeRequestId
+          ? { ...m, details: supervisorStream.details }
+          : m
+      )
+    );
+  }, [activeRequestId, supervisorStream.details]);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [isMicActive, setIsMicActive] = useState(false);
@@ -94,10 +110,17 @@ export default function Cockpit() {
 
   const sendMessageMutation = trpc.chat.sendMessage.useMutation({
     onSuccess: (data) => {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: data.response },
-      ]);
+      setMessages((prev) => {
+        const reqId = (data as { requestId?: string }).requestId;
+        // 将对应 requestId 的 thinking 消息标记为 completed
+        const next = prev.map((m) =>
+          m.role === "thinking" && reqId && m.requestId === reqId
+            ? { ...m, status: "completed" as const, headline: "Metris Agent 已完成思考", endedAt: Date.now() }
+            : m
+        );
+        return [...next, { role: "assistant" as const, content: data.response }];
+      });
+      setActiveRequestId(undefined);
       // 解析情感标签并分发到舞台事件总线
       const parsed = parseEmotionTags(data.response);
       if (parsed.tags.length > 0) {
@@ -111,6 +134,15 @@ export default function Cockpit() {
       }
     },
     onError: (error) => {
+      // 将 thinking 消息标记为 failed
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.role === "thinking" && m.status === "running"
+            ? { ...m, status: "failed" as const, headline: "Metris Agent 思考失败", endedAt: Date.now() }
+            : m
+        )
+      );
+      setActiveRequestId(undefined);
       // tRPC 后端不可用时自动切换到 Ark 直连模式
       console.warn("[Cockpit] tRPC 失败，切换到 Ark 直连模式:", error.message);
       setArkDirectMode(true);
@@ -217,10 +249,29 @@ export default function Cockpit() {
     } else {
       // 通知舞台进入 thinking 状态
       notifyThinking();
+      // v0.5：生成 requestId，插入一条 thinking 占位消息，同时启动 SSE 订阅
+      const requestId =
+        (typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      setActiveRequestId(requestId);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "thinking" as const,
+          content: "",
+          requestId,
+          status: "running" as const,
+          headline: "Metris Agent 思考中...",
+          details: [],
+          startedAt: Date.now(),
+        },
+      ]);
       sendMessageMutation.mutate({
         message: userMessage,
         sessionId: currentSessionId ?? undefined,
         characterId,
+        requestId,
       });
     }
   };
