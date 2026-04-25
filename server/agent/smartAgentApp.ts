@@ -328,6 +328,64 @@ export class SmartAgentApp {
   );
 
   /**
+   * v0.5：流式版本 chat 接口
+   *
+   * 与 chat() 输入/输出完全一致，只是额外通过 supervisorEventBus 推送中间事件。
+   * 推荐路由层在收到 requestId 时调用本方法，前端通过 SSE 订阅同一 requestId。
+   */
+  chatStreaming = async (
+    userMessage: string,
+    options: {
+      userId: string;
+      sessionId: string;
+      conversationHistory?: Array<{ role: string; content: string }>;
+      platform?: "windows" | "mac" | "linux";
+      characterId?: string;
+      requestId: string;
+    }
+  ): Promise<SupervisorOutput> => {
+    if (!this.initialized) {
+      throw new Error(
+        "[SmartAgentApp] Not initialized. Call initialize() first."
+      );
+    }
+
+    const { runSupervisorStreaming } = await import(
+      "./supervisor/runSupervisorStreaming"
+    );
+
+    const context = await this.contextManager.getContext(
+      options.userId,
+      options.sessionId
+    );
+
+    let userMessageForSupervisor = userMessage;
+    if (userMessageLooksLikeDiskIntent(userMessage)) {
+      userMessageForSupervisor =
+        userMessage +
+        "\n\n[系统指令] 你必须先调用 get_disk_health 工具（参数 driveLetter 默认 C），将返回的已用/剩余空间、health 等写入回复；若用户还关心可清理垃圾体量，再调用 scan_system_junk。禁止仅用「打开磁盘属性、运行磁盘清理」等通用手动教程作为主要回答，工具结果须优先呈现。";
+    }
+
+    return runSupervisorStreaming(
+      {
+        userMessage: userMessageForSupervisor,
+        conversationHistory: options.conversationHistory,
+        context: {
+          userId: options.userId,
+          sessionId: options.sessionId,
+          location: context.location,
+          platform: options.platform || context.platform,
+          personality: context.personality,
+          responseStyle: context.responseStyle,
+          characterId: options.characterId || "xiaozhi",
+        },
+        requestId: options.requestId,
+      },
+      this.agentCardRegistry
+    );
+  };
+
+  /**
    * 更新用户位置
    */
   async updateUserLocation(

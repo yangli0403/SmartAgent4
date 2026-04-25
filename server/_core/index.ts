@@ -13,6 +13,7 @@ import chatRouterEnhanced from "../routers/chatRouterEnhanced";
 // 网易云音乐 MCP 内嵌服务
 import { startNeteaseMCPServer, NETEASE_MCP_PORT } from "../mcp/netease/index";
 import { attachAsrWebSocket } from "../asr/asrStreamSocket";
+import { createSupervisorSseRouter } from "../agent/supervisor/supervisorSseRouter";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -65,6 +66,8 @@ async function startServer() {
   // 新API路由：序列思考、增强聊天（记忆相关功能已统一到 tRPC memory 路由）
   app.use("/api/sequential-thinking", sequentialThinkingRouter);
   app.use("/api/chat", chatRouterEnhanced);
+  // v0.5: Supervisor 流式事件 SSE 端点（前端 ThinkingBubble 订阅）
+  app.use(createSupervisorSseRouter());
   // tRPC API
   app.use(
     "/api/trpc",

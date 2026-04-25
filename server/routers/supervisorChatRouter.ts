@@ -68,6 +68,8 @@ export const supervisorChatRouter = router({
       z.object({
         message: z.string().min(1),
         sessionId: z.number().nullable().optional(),
+        /** v0.5: 可选流式请求 ID，如提供则同时推送 SSE 中间事件 */
+        requestId: z.string().min(1).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -99,14 +101,21 @@ export const supervisorChatRouter = router({
         ctx.user?.name ||
         undefined;
 
-      // 调用 SmartAgent App
+      // 调用 SmartAgent App。v0.5：提供了 requestId 则走流式版本，
+      //              同时以 SSE 形式推送中间事件给前端 ThinkingBubble。
       const app = getSmartAgentApp();
-      const result = await app.chat(input.message, {
+      const baseOptions = {
         userId: String(userId),
         sessionId: sessionId ? String(sessionId) : "default",
         conversationHistory,
-        platform: undefined,
-      });
+        platform: undefined as undefined | "windows" | "mac" | "linux",
+      };
+      const result = input.requestId
+        ? await app.chatStreaming(input.message, {
+            ...baseOptions,
+            requestId: input.requestId,
+          })
+        : await app.chat(input.message, baseOptions);
 
       // 保存对话到数据库
       const savedUser = await saveConversation({
@@ -147,6 +156,7 @@ export const supervisorChatRouter = router({
         totalDurationMs: result.totalDurationMs,
         personality,
         persisted,
+        requestId: input.requestId,
       };
     }),
 
