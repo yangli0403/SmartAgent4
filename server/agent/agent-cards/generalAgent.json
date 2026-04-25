@@ -13,7 +13,8 @@
     "memory_store",
     "memory_search",
     "memory_update",
-    "memory_forget"
+    "memory_forget",
+    "get_latest_news"
   ],
   "domain": "general",
   "implementationClass": "GeneralAgent",
