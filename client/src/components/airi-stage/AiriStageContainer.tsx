@@ -16,6 +16,10 @@ import { useExpressionDriver } from "@/hooks/useExpressionDriver";
 import { useMotionDriver } from "@/hooks/useMotionDriver";
 import { useLipsyncDriver } from "@/hooks/useLipsyncDriver";
 import { useIdleManager } from "@/hooks/useIdleManager";
+import {
+  computeFraming,
+  type AiriViewMode,
+} from "@/lib/airi-stage/framing";
 
 // pixi-live2d-display 需要全局 PIXI 引用
 (window as any).PIXI = PIXI;
@@ -32,6 +36,16 @@ interface AiriStageContainerProps {
   onModelLoaded?: () => void;
   /** 模型加载失败回调 */
   onModelError?: (error: string) => void;
+  /**
+   * v0.5 新增：视图模式
+   * - fullBody（默认）：全身自适应、与 v0.4 行为一致
+   * - halfBody：上半身特写，适合车载场景下胸位以上都不在画面里
+   */
+  viewMode?: AiriViewMode;
+  /**
+   * v0.5 新增：halfBody 底下的放大系数覆盖（默认 1.6，范围 [0.5, 3.0]）
+   */
+  framingRatio?: number;
 }
 
 /**
@@ -43,6 +57,8 @@ export function AiriStageContainer({
   className = "",
   onModelLoaded,
   onModelError,
+  viewMode = "fullBody",
+  framingRatio,
 }: AiriStageContainerProps) {
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<PIXI.Application | null>(null);
@@ -106,11 +122,18 @@ export function AiriStageContainer({
       });
 
       // 自适应缩放：根据容器尺寸自动计算
-      const scaleVal = Math.min(width / model.width, height / model.height) * 0.85;
-      model.scale.set(scaleVal);
-      model.x = width / 2;
-      model.y = height * 0.92;
-      model.anchor.set(0.5, 1.0);
+      const framing = computeFraming(
+        viewMode,
+        width,
+        height,
+        model.width,
+        model.height,
+        framingRatio
+      );
+      model.scale.set(framing.scale);
+      model.x = framing.x;
+      model.y = framing.y;
+      model.anchor.set(0.5, framing.anchorY);
 
       app.stage.addChild(model);
       modelRef.current = model;
@@ -143,6 +166,8 @@ export function AiriStageContainer({
     setModelError,
     onModelLoaded,
     onModelError,
+    viewMode,
+    framingRatio,
   ]);
 
   /**
@@ -175,15 +200,25 @@ export function AiriStageContainer({
       appRef.current.renderer.resize(width, height);
 
       const model = modelRef.current;
-      const scaleVal = Math.min(width / (model.width / model.scale.x), height / (model.height / model.scale.y)) * 0.85;
-      model.scale.set(scaleVal);
-      model.x = width / 2;
-      model.y = height * 0.92;
+      const naturalWidth = model.width / model.scale.x;
+      const naturalHeight = model.height / model.scale.y;
+      const framing = computeFraming(
+        viewMode,
+        width,
+        height,
+        naturalWidth,
+        naturalHeight,
+        framingRatio
+      );
+      model.scale.set(framing.scale);
+      model.x = framing.x;
+      model.y = framing.y;
+      model.anchor.set(0.5, framing.anchorY);
     };
 
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, []);
+  }, [viewMode, framingRatio]);
 
   // 未启用时显示占位符
   if (!enabled) {

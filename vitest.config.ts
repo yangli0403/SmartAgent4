@@ -5,11 +5,24 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    /**
+     * v0.5：按文件 glob 切换环境
+     * - client/** 与 shared/** 走 jsdom（React / DOM API）
+     * - 其它默认 node
+     */
+    environmentMatchGlobs: [
+      ["client/**", "jsdom"],
+      ["shared/**", "jsdom"],
+    ],
     include: [
       "tests/**/*.test.ts",
       "server/**/__tests__/**/*.test.ts",
       "server/chat.test.ts",
+      // v0.5 新增：client / shared / hooks 端测试
+      "client/src/**/__tests__/**/*.test.{ts,tsx}",
+      "shared/__tests__/**/*.test.ts",
     ],
+    setupFiles: ["client/src/__tests__/setup.ts"],
     coverage: {
       provider: "v8",
       include: [
@@ -22,8 +35,14 @@ export default defineConfig({
         "server/agent/supervisor/reflectionNode.ts",
         "server/agent/discovery/**/*.ts",
         "server/airi-bridge/**/*.ts",
+        // v0.5 新增覆盖目标
+        "shared/chatTts.ts",
+        "shared/supervisorEvents.ts",
+        "server/agent/supervisor/supervisorEvents.ts",
+        "server/asr/asrStreamSocket.ts",
+        "client/src/lib/airi-stage/framing.ts",
       ],
-      exclude: ["**/*.test.ts", "**/index.ts"],
+      exclude: ["**/*.test.ts", "**/*.test.tsx", "**/index.ts"],
     },
   },
   resolve: {
