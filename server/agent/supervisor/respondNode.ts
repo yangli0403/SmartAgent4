@@ -93,12 +93,54 @@ export async function respondNode(
   const agentOutput = stepResults.length > 0 && stepResults[stepResults.length - 1].output;
 
   if (isGeneralSimple && hasNoToolCalls && agentOutput && agentOutput.length > 20) {
-    console.log(`[RespondNode] General+Simple task with no tool calls, using agent output directly (${agentOutput.length} chars)`);
-    const aiMsg = new AIMessage(agentOutput);
-    return {
-      messages: [aiMsg],
-      finalResponse: agentOutput,
-    };
+    // 检查 agentOutput 是否已包含情感标签
+    const hasEmotionTags = /\[(expression|animation|gesture|posture|locomotion|sound|pause):[^\]]+\]/.test(agentOutput);
+    if (hasEmotionTags) {
+      console.log(`[RespondNode] General+Simple with emotion tags, using agent output directly (${agentOutput.length} chars)`);
+      const aiMsg = new AIMessage(agentOutput);
+      return {
+        messages: [aiMsg],
+        finalResponse: agentOutput,
+      };
+    }
+    // 没有标签时，通过轻量 LLM 调用补充情感标签
+    console.log(`[RespondNode] General+Simple without emotion tags, enriching with emotion tags...`);
+    try {
+      const enrichPrompt = `你是一个情感标签注入助手。请在以下回复文本的合适位置插入情感和动作标签，让回复更加生动。
+标签格式为 [类型:值]，可用标签：
+- 表情: [expression:smile], [expression:happy], [expression:sad], [expression:surprised], [expression:think]
+- 动画: [animation:nod], [animation:wave], [animation:head_tilt], [animation:bow]
+- 手势: [gesture:thumbs_up], [gesture:clap], [gesture:shrug], [gesture:open_palms]
+
+规则：
+1. 在回复开头添加一个合适的表情标签
+2. 在回复中间或结尾添加1-2个动作标签
+3. 不要修改原始文本内容，只添加标签
+4. 标签要自然，不要过度使用
+
+原始回复：
+${agentOutput}
+
+请输出添加了标签的完整回复：`;
+      const enrichedResponse = await callLLMText(
+        "你是一个情感标签注入助手，只负责在文本中添加 [类型:值] 格式的情感标签。",
+        enrichPrompt,
+        { temperature: 0.3 }
+      );
+      console.log(`[RespondNode] Enriched response with emotion tags (${enrichedResponse.length} chars):`, enrichedResponse.substring(0, 300));
+      const aiMsg = new AIMessage(enrichedResponse);
+      return {
+        messages: [aiMsg],
+        finalResponse: enrichedResponse,
+      };
+    } catch (enrichError) {
+      console.warn("[RespondNode] Emotion tag enrichment failed, using original output:", (enrichError as Error).message);
+      const aiMsg = new AIMessage(agentOutput);
+      return {
+        messages: [aiMsg],
+        finalResponse: agentOutput,
+      };
+    }
   }
 
   // === 构建增强的 System Prompt ===

@@ -2,77 +2,81 @@
  * 动作映射配置 — MotionMapping
  *
  * 定义每种动作指令对应的 Live2D Motion Group 和索引。
- * Live2D 模型的 motion3.json 中定义了多个 Motion Group（如 Idle, TapBody 等），
+ * Live2D 模型的 motion3.json 中定义了多个 Motion Group，
  * 每个 Group 包含多个动作文件。此映射将语义化的动作名称映射到具体的 Group + Index。
  *
+ * 当前模型 (haru_greeter_t03) 可用的 Motion Group：
+ *   - Idle: 3 个动作 (index 0-2)  — haru_g_idle, haru_g_m07, haru_g_m15
+ *   - Tap:  2 个动作 (index 0-1)  — haru_g_m14, haru_g_m05
+ *
  * 注意：具体的 Group 名称和 Index 取决于所使用的 Live2D 模型。
- * 以下配置基于 Hiyori 模型的 Motion Group 结构。
+ * 如果更换模型，需要同步更新此映射。
  */
 
 import type { MotionMappingConfig } from "./types";
 
 export const MOTION_MAPPING: MotionMappingConfig = {
-  // ==================== 基础动作 ====================
+  // ==================== 基础动作（映射到 Tap group）====================
 
   nod: {
     name: "点头",
-    group: "TapBody",
+    group: "Tap",
     index: 0,
     priority: 2,
   },
 
   wave: {
     name: "挥手",
-    group: "TapBody",
+    group: "Tap",
     index: 1,
     priority: 2,
   },
 
   shake_head: {
     name: "摇头",
-    group: "TapBody",
-    index: 2,
+    group: "Tap",
+    index: 0,
     priority: 2,
   },
 
   bow: {
     name: "鞠躬",
-    group: "TapBody",
-    index: 3,
+    group: "Tap",
+    index: 1,
     priority: 3,
   },
 
   head_tilt: {
     name: "歪头",
-    group: "TapBody",
-    index: 4,
+    group: "Tap",
+    index: 0,
     priority: 1,
   },
 
-  // ==================== 手势动作 ====================
+  // ==================== 手势动作（映射到 Tap group）====================
 
   thumbs_up: {
     name: "赞同",
-    group: "TapBody",
-    index: 5,
+    group: "Tap",
+    index: 1,
     priority: 1,
   },
 
   clap: {
     name: "鼓掌",
-    group: "TapBody",
-    index: 6,
+    group: "Tap",
+    index: 0,
     priority: 2,
   },
 
   shrug: {
     name: "耸肩",
-    group: "TapBody",
-    index: 7,
+    group: "Tap",
+    index: 1,
     priority: 1,
   },
 
-  // ==================== 闲置动作 ====================
+  // ==================== 闲置动作（映射到 Idle group）====================
 
   idle_breathe: {
     name: "呼吸",
