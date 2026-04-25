@@ -367,6 +367,7 @@ export default function Cockpit() {
           <AiriStageContainer
             enabled={true}
             className="w-full h-full"
+            viewMode="halfBody"
           />
         </div>
       </div>
