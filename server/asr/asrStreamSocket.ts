@@ -1,52 +1,28 @@
 /**
- * 浏览器 WebSocket → 百炼 DashScope Fun-ASR 实时识别（流式）
- * 协议参考：https://help.aliyun.com/zh/model-studio/fun-asr-realtime-websocket-api
+ * 浏览器 WebSocket → 百炼 DashScope 实时 ASR（流式）
+ * 协议参考：https://help.aliyun.com/zh/model-studio/realtime-asr-websocket-api
+ *
+ * v0.5：
+ * - 默认模型升级为 paraformer-realtime-v2（多方言版）
+ * - 添加 language_hints 参数以允许粁语/吴语/闽南语等粘合输入
+ * - 将模型选型与报文构造抽出到 ./asrConfig.ts
  */
 import type { IncomingMessage } from "http";
 import type { Server } from "http";
 import crypto from "crypto";
 import WebSocket, { WebSocketServer } from "ws";
+import {
+  resolveAsrModel,
+  resolveLanguageHints,
+  buildAsrRunTaskPayload,
+  buildAsrFinishTaskPayload,
+} from "./asrConfig";
 
 const DEFAULT_DASHSCOPE_WS =
   "wss://dashscope.aliyuncs.com/api-ws/v1/inference/";
-const DEFAULT_MODEL = "fun-asr-realtime";
 
 function getTaskId(): string {
   return crypto.randomBytes(16).toString("hex");
-}
-
-function buildRunTaskMessage(taskId: string, model: string) {
-  return {
-    header: {
-      action: "run-task",
-      task_id: taskId,
-      streaming: "duplex",
-    },
-    payload: {
-      task_group: "audio",
-      task: "asr",
-      function: "recognition",
-      model,
-      parameters: {
-        sample_rate: 16000,
-        format: "pcm",
-      },
-      input: {},
-    },
-  };
-}
-
-function buildFinishTaskMessage(taskId: string) {
-  return {
-    header: {
-      action: "finish-task",
-      task_id: taskId,
-      streaming: "duplex",
-    },
-    payload: {
-      input: {},
-    },
-  };
 }
 
 async function bridgeClientToDashScope(
@@ -55,7 +31,8 @@ async function bridgeClientToDashScope(
 ): Promise<void> {
   const dashscopeUrl =
     process.env.DASHSCOPE_ASR_WS_URL || DEFAULT_DASHSCOPE_WS;
-  const model = process.env.DASHSCOPE_ASR_MODEL || DEFAULT_MODEL;
+  const model = resolveAsrModel();
+  const languageHints = resolveLanguageHints();
   const taskId = getTaskId();
 
   const upstream = new WebSocket(dashscopeUrl, {
@@ -78,7 +55,9 @@ async function bridgeClientToDashScope(
   };
 
   upstream.on("open", () => {
-    upstream.send(JSON.stringify(buildRunTaskMessage(taskId, model)));
+    upstream.send(
+      JSON.stringify(buildAsrRunTaskPayload(taskId, model, languageHints))
+    );
   });
 
   upstream.on("message", (data, isBinary) => {
@@ -177,7 +156,7 @@ async function bridgeClientToDashScope(
       const j = JSON.parse(s) as { type?: string };
       if (j.type === "end") {
         if (upstream.readyState === WebSocket.OPEN) {
-          upstream.send(JSON.stringify(buildFinishTaskMessage(taskId)));
+          upstream.send(JSON.stringify(buildAsrFinishTaskPayload(taskId)));
         }
       }
     } catch {
@@ -188,7 +167,7 @@ async function bridgeClientToDashScope(
   clientWs.on("close", () => {
     if (upstream.readyState === WebSocket.OPEN) {
       try {
-        upstream.send(JSON.stringify(buildFinishTaskMessage(taskId)));
+        upstream.send(JSON.stringify(buildAsrFinishTaskPayload(taskId)));
       } catch {
         /* noop */
       }
