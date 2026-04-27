@@ -571,6 +571,12 @@ export abstract class BaseAgent implements DomainAgentInterface {
   private jsonSchemaToZod(
     schema: Record<string, unknown>
   ): z.ZodObject<any> {
+    // === 泛化兼容 Zod v4 内部序列化格式 ===
+    const _def = schema.def as Record<string, unknown> | undefined;
+    if (_def && _def.shape && typeof _def.shape === "object") {
+      return this._zodInternalToZod(_def.shape as Record<string, Record<string, unknown>>);
+    }
+    // === 以下为标准 JSON Schema 处理 ===
     const properties = (schema.properties || {}) as Record<
       string,
       Record<string, unknown>
@@ -611,5 +617,69 @@ export abstract class BaseAgent implements DomainAgentInterface {
     }
 
     return z.object(shape);
+  }
+
+  /**
+   * 将 Zod v4 内部 shape 格式转换为 Zod Schema
+   */
+  private _zodInternalToZod(
+    shape: Record<string, Record<string, unknown>>
+  ): z.ZodObject<any> {
+    const zodShape: Record<string, z.ZodTypeAny> = {};
+    for (const [key, fieldSchema] of Object.entries(shape)) {
+      zodShape[key] = this._zodInternalFieldToZod(fieldSchema, key);
+    }
+    return z.object(zodShape);
+  }
+
+  /**
+   * 递归解析 Zod v4 内部字段类型
+   */
+  private _zodInternalFieldToZod(
+    field: Record<string, unknown>,
+    fieldName: string
+  ): z.ZodTypeAny {
+    const fieldType = field.type as string;
+    const fieldDef = field.def as Record<string, unknown> | undefined;
+
+    // 处理 default 包装（有默认值的字段）
+    if (fieldType === "default" && fieldDef) {
+      const innerType = fieldDef.innerType as Record<string, unknown> | undefined;
+      if (innerType) {
+        return this._zodInternalFieldToZod(innerType, fieldName).optional();
+      }
+    }
+
+    // 处理 optional 包装
+    if (fieldType === "optional" && fieldDef) {
+      const innerType = fieldDef.innerType as Record<string, unknown> | undefined;
+      if (innerType) {
+        return this._zodInternalFieldToZod(innerType, fieldName).optional();
+      }
+    }
+
+    // 基础类型
+    switch (fieldType) {
+      case "string":
+        return z.string().describe(fieldName);
+      case "number":
+        return z.number().describe(fieldName);
+      case "boolean":
+        return z.boolean().describe(fieldName);
+      case "enum": {
+        const entries = (fieldDef?.entries || (field as any).entries || {}) as Record<string, string>;
+        const values = Object.values(entries);
+        if (values.length > 0) {
+          return z.enum(values as [string, ...string[]]).describe(fieldName);
+        }
+        return z.string().describe(fieldName);
+      }
+      case "array":
+        return z.array(z.any()).describe(fieldName);
+      case "object":
+        return z.record(z.string(), z.any()).describe(fieldName);
+      default:
+        return z.any().describe(fieldName);
+    }
   }
 }

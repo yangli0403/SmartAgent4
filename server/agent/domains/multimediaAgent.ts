@@ -22,7 +22,7 @@ export const MULTIMEDIA_AGENT_CONFIG: DomainAgentConfig = {
 管理歌单、获取歌词、查看专辑和歌手信息等。
 
 可用工具说明：
-- search: 搜索歌曲、歌手、专辑、歌单等，支持关键词搜索
+- search: 搜索歌曲、歌手、专辑、歌单等。必须传入 keywords 参数（字符串）。调用示例：search({"keywords": "周杰伦 晴天", "type": "1", "limit": 10})。类型 type 可选：1=歌曲, 10=专辑, 100=歌手, 1000=歌单
 - get_song_detail: 获取一首或多首歌曲的详细元数据信息
 - get_song_url: 获取歌曲的播放链接，支持多种音质（standard, higher, exhigh, lossless, hires等）
 - get_unblocked_url: 获取歌曲播放链接的特殊版本，可尝试解锁灰色（不可播放）歌曲

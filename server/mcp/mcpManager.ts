@@ -16,6 +16,27 @@ import {
   callFileOrganizerTool,
   BUILTIN_FILE_ORGANIZER_SERVER_ID,
 } from "./fileOrganizerRuntime";
+import { callFeishuTool, FEISHU_TOOLS_SERVER_ID } from "../agent/tools/feishuTools";
+import { callNewsTool, NEWS_TOOLS_SERVER_ID } from "../agent/tools/newsTools";
+import { callServiceTool, SERVICE_TOOLS_SERVER_ID } from "../agent/tools/serviceTools";
+import { callItineraryTool, ITINERARY_TOOLS_SERVER_ID } from "../agent/tools/itineraryTools";
+
+/**
+ * 泛化内置工具路由表
+ * 新增内置工具只需在此注册 serverId → handler 映射即可
+ */
+const BUILTIN_TOOL_HANDLERS: Record<
+  string,
+  (toolName: string, args: Record<string, unknown>) => Promise<unknown>
+> = {
+  [MEMORY_TOOLS_SERVER_ID]: callMemoryTool,
+  [BUILTIN_FILE_ORGANIZER_SERVER_ID]: callFileOrganizerTool,
+  [FEISHU_TOOLS_SERVER_ID]: callFeishuTool,
+  [NEWS_TOOLS_SERVER_ID]: callNewsTool,
+  [SERVICE_TOOLS_SERVER_ID]: callServiceTool,
+  [ITINERARY_TOOLS_SERVER_ID]: callItineraryTool,
+  "builtin-free-weather": callFreeWeatherTool,
+};
 
 // 内置工具的 serverId 前缀
 const BUILTIN_SERVER_PREFIX = "builtin-";
@@ -329,15 +350,12 @@ export class MCPManager implements IMCPManager {
       );
       const startTime = Date.now();
       try {
-        // 根据 serverId 分发到不同的内置工具处理器
-        let result: unknown;
-        if (tool.serverId === MEMORY_TOOLS_SERVER_ID) {
-          result = await callMemoryTool(toolName, args);
-        } else if (tool.serverId === BUILTIN_FILE_ORGANIZER_SERVER_ID) {
-          result = await callFileOrganizerTool(toolName, args);
-        } else {
-          result = await callFreeWeatherTool(toolName, args);
+        // 泛化路由：根据 serverId 查找对应的内置工具处理器
+        const handler = BUILTIN_TOOL_HANDLERS[tool.serverId];
+        if (!handler) {
+          throw new Error(`No handler registered for builtin server: ${tool.serverId} (tool: ${toolName})`);
         }
+        const result = await handler(toolName, args);
         console.log(`[MCPManager] Builtin tool ${toolName} completed in ${Date.now() - startTime}ms`);
         return result;
       } catch (error) {
