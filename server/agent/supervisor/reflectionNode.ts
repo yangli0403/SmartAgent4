@@ -93,11 +93,20 @@ export async function reflectionNode(
 
   if (allToolCalls.length === 0) {
     console.log("[ReflectionNode] No tool calls to reflect on, skipping");
-    return {};
+    return {
+      reflectionMeta: {
+        toolLogsPersisted: 0,
+        llmReflectionTriggered: false,
+      },
+    };
   }
 
   const userId = context?.userId || "unknown";
   const sessionId = context?.sessionId || "unknown";
+
+  const hasFailures = (stepResults || []).some((r) => r.status !== "success");
+  const isComplexTask = taskClassification?.complexity === "complex";
+  const llmReflectionTriggered = Boolean(hasFailures || isComplexTask);
 
   // ===== 异步执行反思（fire-and-forget） =====
   performReflection(
@@ -115,8 +124,13 @@ export async function reflectionNode(
     );
   });
 
-  // 不修改状态
-  return {};
+  // 同步返回反思元信息（不需等反思全部完成，仅供思考面板可观测）
+  return {
+    reflectionMeta: {
+      toolLogsPersisted: allToolCalls.length,
+      llmReflectionTriggered,
+    },
+  };
 }
 
 /**

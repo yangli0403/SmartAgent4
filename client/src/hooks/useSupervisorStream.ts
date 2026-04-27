@@ -109,10 +109,13 @@ export function useSupervisorStream(
 
     const eventNames: SupervisorEventType[] = [
       "classified",
+      "memory_recalled",
       "plan_ready",
-      "step_running",
+      "step_started",
       "step_finished",
       "replan",
+      "reflected",
+      "memory_extracted",
       "error",
     ];
 

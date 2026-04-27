@@ -36,6 +36,12 @@ export interface StreamingContext {
   planPublished?: boolean;
   /** 是否已发布过 final */
   finalPublished?: boolean;
+  /** 是否已发布过 memory_recalled */
+  memoryRecalledPublished?: boolean;
+  /** 是否已发布过 reflected */
+  reflectedPublished?: boolean;
+  /** 是否已发布过 memory_extracted */
+  memoryExtractedPublished?: boolean;
 }
 
 export interface StreamUpdate {
@@ -61,6 +67,23 @@ export interface StreamUpdate {
   replanCount?: number;
   replanReason?: string;
   finalResponse?: string;
+  /** v0.6 观测字段：召回记忆元信息 */
+  memoryRecallMeta?: {
+    count: number;
+    previews: string[];
+    prefetchHit: boolean;
+  };
+  /** v0.6 观测字段：反思入库元信息 */
+  reflectionMeta?: {
+    toolLogsPersisted: number;
+    llmReflectionTriggered: boolean;
+  };
+  /** v0.6 观测字段：记忆提取元信息 */
+  memoryExtractionMeta?: {
+    workingMemoryUpdated: boolean;
+    behaviorDetectionTriggered: boolean;
+    extractedCount: number;
+  };
 }
 
 /**
@@ -76,28 +99,59 @@ export function publishEventsFromUpdates(
 
   // 1. classified
   if (update.taskClassification && !ctx.classifiedPublished) {
+    const cls = update.taskClassification;
+    const reasoningSnippet = cls.reasoning
+      ? `（${cls.reasoning.length > 28 ? cls.reasoning.slice(0, 28) + "…" : cls.reasoning}）`
+      : "";
     publishSupervisorEvent({
       requestId: ctx.requestId,
       type: "classified",
       phase: "classified",
-      summary: `任务分类：${update.taskClassification.domain}·${update.taskClassification.complexity}`,
+      summary: `任务分类：${cls.domain}·${cls.complexity}${reasoningSnippet}`,
       payload: {
-        domain: update.taskClassification.domain,
-        complexity: update.taskClassification.complexity,
-        reasoning: update.taskClassification.reasoning ?? "",
+        domain: cls.domain,
+        complexity: cls.complexity,
+        reasoning: cls.reasoning ?? "",
       },
     });
     ctx.classifiedPublished = true;
     published++;
   }
 
+  // 1.5 memory_recalled【v0.6 新增】
+  if (update.memoryRecallMeta && !ctx.memoryRecalledPublished) {
+    const m = update.memoryRecallMeta;
+    const summary =
+      m.count > 0
+        ? `召回 ${m.count} 条相关记忆${m.prefetchHit ? "（预取命中）" : ""}`
+        : `本轮未命中长期记忆${m.prefetchHit ? "（预取命中）" : ""}`;
+    publishSupervisorEvent({
+      requestId: ctx.requestId,
+      type: "memory_recalled",
+      phase: "memory_recalled",
+      summary,
+      payload: {
+        count: m.count,
+        previews: m.previews,
+        prefetchHit: m.prefetchHit,
+      },
+    });
+    ctx.memoryRecalledPublished = true;
+    published++;
+  }
+
   // 2. plan_ready
   if (update.plan && update.plan.length > 0 && !ctx.planPublished) {
+    const firstAgent = update.plan[0]?.targetAgent;
+    const firstTools = update.plan[0]?.expectedTools ?? [];
+    const agentSuffix = firstAgent
+      ? `，首步 → ${firstAgent}${firstTools.length > 0 ? `·${firstTools.slice(0, 2).join(",")}` : ""}`
+      : "";
     publishSupervisorEvent({
       requestId: ctx.requestId,
       type: "plan_ready",
       phase: "plan_ready",
-      summary: `已生成 ${update.plan.length} 步执行计划`,
+      summary: `已生成 ${update.plan.length} 步执行计划${agentSuffix}`,
       payload: {
         steps: update.plan.map((s) => ({
           id: s.id,
@@ -134,11 +188,24 @@ export function publishEventsFromUpdates(
     if (newLen > lastLen) {
       for (let i = lastLen; i < newLen; i++) {
         const r = update.stepResults[i];
+        const toolNames = (r.toolCalls ?? [])
+          .map((t) => t.name)
+          .filter((n): n is string => Boolean(n));
+        const statusLabel =
+          r.status === "success" ? "完成" : `${r.status}`;
+        const toolSuffix =
+          toolNames.length > 0
+            ? ` · 调用 ${toolNames.slice(0, 2).join(", ")}${toolNames.length > 2 ? "等" : ""}`
+            : "";
+        const durationSuffix =
+          typeof r.durationMs === "number" && r.durationMs > 0
+            ? ` · ${r.durationMs}ms`
+            : "";
         publishSupervisorEvent({
           requestId: ctx.requestId,
           type: "step_finished",
           phase: "step_finished",
-          summary: `步骤 #${r.stepId} ${r.status === "success" ? "完成" : r.status}`,
+          summary: `步骤 #${r.stepId} ${statusLabel}${toolSuffix}${durationSuffix}`,
           payload: {
             stepId: r.stepId,
             status: r.status,
@@ -171,6 +238,49 @@ export function publishEventsFromUpdates(
     } else {
       ctx.lastReplanCount = update.replanCount;
     }
+  }
+
+  // 5.5 reflected【v0.6 新增】
+  if (update.reflectionMeta && !ctx.reflectedPublished) {
+    const r = update.reflectionMeta;
+    const summary =
+      r.toolLogsPersisted > 0
+        ? `反思入库：${r.toolLogsPersisted} 条工具效用日志${r.llmReflectionTriggered ? "，已触发 LLM 复盘" : ""}`
+        : `无工具调用，跳过反思`;
+    publishSupervisorEvent({
+      requestId: ctx.requestId,
+      type: "reflected",
+      phase: "reflected",
+      summary,
+      payload: {
+        toolLogsPersisted: r.toolLogsPersisted,
+        llmReflectionTriggered: r.llmReflectionTriggered,
+      },
+    });
+    ctx.reflectedPublished = true;
+    published++;
+  }
+
+  // 5.7 memory_extracted【v0.6 新增】
+  if (update.memoryExtractionMeta && !ctx.memoryExtractedPublished) {
+    const m = update.memoryExtractionMeta;
+    const parts: string[] = [];
+    if (m.workingMemoryUpdated) parts.push("工作记忆已更新");
+    if (m.behaviorDetectionTriggered) parts.push("触发行为检测");
+    if (m.extractedCount > 0) parts.push(`提取 ${m.extractedCount} 条新记忆`);
+    publishSupervisorEvent({
+      requestId: ctx.requestId,
+      type: "memory_extracted",
+      phase: "memory_extracted",
+      summary: parts.length > 0 ? parts.join("、") : "记忆提取已调度",
+      payload: {
+        workingMemoryUpdated: m.workingMemoryUpdated,
+        behaviorDetectionTriggered: m.behaviorDetectionTriggered,
+        extractedCount: m.extractedCount,
+      },
+    });
+    ctx.memoryExtractedPublished = true;
+    published++;
   }
 
   // 6. final

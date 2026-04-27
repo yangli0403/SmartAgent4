@@ -31,10 +31,13 @@ export interface ChatTtsPayload {
 export type ChatThinkingPhase =
   | "queued"
   | "classified"
+  | "memory_recalled"
   | "plan_ready"
   | "step_running"
   | "step_finished"
   | "replan"
+  | "reflected"
+  | "memory_extracted"
   | "completed"
   | "error";
 

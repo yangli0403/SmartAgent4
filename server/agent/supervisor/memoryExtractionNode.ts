@@ -81,7 +81,13 @@ export async function memoryExtractionNode(
     console.warn(
       "[MemoryExtractionNode] No userId available, skipping extraction"
     );
-    return {};
+    return {
+      memoryExtractionMeta: {
+        workingMemoryUpdated: false,
+        behaviorDetectionTriggered: false,
+        extractedCount: 0,
+      },
+    };
   }
 
   // 提取最近的对话消息
@@ -158,7 +164,13 @@ export async function memoryExtractionNode(
       "[MemoryExtractionNode] Auto extraction disabled (skills-based memory mode). " +
         "Working memory updated. Behavior detection triggered. Skipping LLM extraction pipeline."
     );
-    return {};
+    return {
+      memoryExtractionMeta: {
+        workingMemoryUpdated: Boolean(lastUserMsg) || Boolean(finalResponse),
+        behaviorDetectionTriggered: currentCount === 0, // 0 = 刚被重置，表示本轮触发了
+        extractedCount: 0,
+      },
+    };
   }
 
   // === 以下为旧模式：异步提取记忆（fire-and-forget） ===
@@ -181,6 +193,13 @@ export async function memoryExtractionNode(
       );
     });
 
-  // 不修改状态，仅触发副作用
-  return {};
+  // 不修改状态，仅触发副作用； extractedCount 在最终提取完成后由 then 回调写日志，
+  // 思考面板仅展示"已启动提取"语义，extractedCount 这里为 0 表示未知/完成后才能统计
+  return {
+    memoryExtractionMeta: {
+      workingMemoryUpdated: Boolean(lastUserMsg) || Boolean(finalResponse),
+      behaviorDetectionTriggered: currentCount === 0,
+      extractedCount: 0,
+    },
+  };
 }

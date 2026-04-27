@@ -253,6 +253,51 @@ export const SupervisorState = Annotation.Root({
     reducer: (_existing, incoming) => incoming,
     default: () => undefined,
   }),
+
+  /**
+   * v0.6 观测字段：记忆检索元信息
+   * 用于在 Supervisor stream 中发布 memory_recalled 事件，不参与图逻辑。
+   */
+  memoryRecallMeta: Annotation<
+    | {
+        count: number;
+        previews: string[];
+        prefetchHit: boolean;
+      }
+    | undefined
+  >({
+    reducer: (_existing, incoming) => incoming,
+    default: () => undefined,
+  }),
+
+  /**
+   * v0.6 观测字段：反思入库元信息
+   */
+  reflectionMeta: Annotation<
+    | {
+        toolLogsPersisted: number;
+        llmReflectionTriggered: boolean;
+      }
+    | undefined
+  >({
+    reducer: (_existing, incoming) => incoming,
+    default: () => undefined,
+  }),
+
+  /**
+   * v0.6 观测字段：记忆提取元信息
+   */
+  memoryExtractionMeta: Annotation<
+    | {
+        workingMemoryUpdated: boolean;
+        behaviorDetectionTriggered: boolean;
+        extractedCount: number;
+      }
+    | undefined
+  >({
+    reducer: (_existing, incoming) => incoming,
+    default: () => undefined,
+  }),
 });
 
 /** Supervisor 图状态的类型别名 */

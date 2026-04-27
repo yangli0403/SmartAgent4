@@ -193,9 +193,19 @@ export async function contextEnrichNode(
         `promptLength=${dynamicSystemPrompt.length}`
     );
 
+    // 为思考面板准备召回记忆元信息（不参与图逻辑）
+    const memoryPreviews = retrievedMemories.slice(0, 3).map((line) =>
+      line.length > 40 ? `${line.slice(0, 40)}…` : line
+    );
+
     return {
       dynamicSystemPrompt,
       retrievedMemories,
+      memoryRecallMeta: {
+        count: retrievedMemories.length,
+        previews: memoryPreviews,
+        prefetchHit: Boolean(prefetchHit),
+      },
     };
   } catch (error) {
     console.error(

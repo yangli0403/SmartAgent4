@@ -14,10 +14,13 @@ import type { ChatThinkingPhase } from "./chatTts";
 /** Supervisor 事件类型枚举 */
 export type SupervisorEventType =
   | "classified"
+  | "memory_recalled"
   | "plan_ready"
   | "step_started"
   | "step_finished"
   | "replan"
+  | "reflected"
+  | "memory_extracted"
   | "final"
   | "error";
 
@@ -85,6 +88,34 @@ export interface FinalPayload {
 export interface ErrorPayload {
   message: string;
   stage: ChatThinkingPhase;
+}
+
+/** 召回记忆事件载荷 */
+export interface MemoryRecalledPayload {
+  /** 命中的记忆条数 */
+  count: number;
+  /** 前几条记忆摘要（截断后用于 UI 展示） */
+  previews: string[];
+  /** 是否命中预取缓存 */
+  prefetchHit: boolean;
+}
+
+/** 反思入库事件载荷 */
+export interface ReflectedPayload {
+  /** 已写入的工具效用日志条数 */
+  toolLogsPersisted: number;
+  /** 是否触发了 LLM 反思（仅复杂或失败任务触发） */
+  llmReflectionTriggered: boolean;
+}
+
+/** 记忆提取事件载荷 */
+export interface MemoryExtractedPayload {
+  /** 工作记忆是否更新 */
+  workingMemoryUpdated: boolean;
+  /** 行为模式检测是否在本轮触发 */
+  behaviorDetectionTriggered: boolean;
+  /** 自动提取得到的新记忆条数（自动提取关闭时为 0） */
+  extractedCount: number;
 }
 
 // ==================== 工具：构造默认信封 ====================
