@@ -1,10 +1,11 @@
 /**
  * News Tools 单元测试
  *
- * 测试 get_latest_news 工具的参数校验、分类过滤和返回结构。
- * 关联用户测试用例：UTC-B1-1 ~ UTC-B1-6
+ * 测试 get_latest_news 工具的注册、参数校验，以及在主源(NewsData.io)
+ * 与备源(百度 RSS)之间的容灾切换。fetch 通过 vi.spyOn 全局 mock，
+ * 避免对外部网络的真实依赖。
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   getLatestNewsImpl,
   registerNewsTools,
@@ -14,130 +15,144 @@ import {
 
 // ==================== Mock ToolRegistry ====================
 const mockRegister = vi.fn();
-const mockToolRegistry = {
-  register: mockRegister,
-};
+const mockToolRegistry = { register: mockRegister };
 
-// ==================== 测试 ====================
+// 用于在每个测试里覆盖 fetch 行为
+let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+function mockNewsDataResp(items: number): Response {
+  const results = Array.from({ length: items }).map((_, i) => ({
+    title: `测试标题-${i + 1}`,
+    link: `https://example.com/n/${i + 1}`,
+    source_name: "测试源",
+    pubDate: "2026-04-26 10:00:00",
+    description: `这是第${i + 1}条测试新闻摘要。`,
+  }));
+  return new Response(JSON.stringify({ status: "success", results }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function mockBaiduRssResp(items: number): Response {
+  const inner = Array.from({ length: items })
+    .map(
+      (_, i) =>
+        `<item><title><![CDATA[百度新闻-${i + 1}]]></title><link>https://baidu.com/n/${
+          i + 1
+        }</link><pubDate>Sat, 26 Apr 2026 10:00:00 GMT</pubDate><description><![CDATA[百度摘要-${
+          i + 1
+        }]]></description></item>`
+    )
+    .join("");
+  const xml = `<?xml version="1.0"?><rss><channel>${inner}</channel></rss>`;
+  return new Response(xml, {
+    status: 200,
+    headers: { "content-type": "application/xml" },
+  });
+}
+
 describe("NewsTools", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.NEWSDATA_API_KEY = "test-key";
+    fetchSpy = vi.spyOn(globalThis, "fetch");
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    delete process.env.NEWSDATA_API_KEY;
   });
 
   // ==================== registerNewsTools ====================
   describe("registerNewsTools", () => {
-    // UTC-B1-6: newsTools 注册函数被调用后，ToolRegistry 中存在 get_latest_news 工具
     it("应注册 1 个新闻工具到 ToolRegistry", () => {
       registerNewsTools(mockToolRegistry as any);
       expect(mockRegister).toHaveBeenCalledTimes(1);
-    });
-
-    it("注册的工具名称应为 get_latest_news", () => {
-      registerNewsTools(mockToolRegistry as any);
-      const registeredName = mockRegister.mock.calls[0][0].name;
-      expect(registeredName).toBe("get_latest_news");
-    });
-
-    it("所有工具的 serverId 应为 NEWS_TOOLS_SERVER_ID", () => {
-      registerNewsTools(mockToolRegistry as any);
+      expect(mockRegister.mock.calls[0][0].name).toBe("get_latest_news");
       expect(mockRegister.mock.calls[0][0].serverId).toBe(NEWS_TOOLS_SERVER_ID);
     });
 
-    it("工具应有 inputSchema 定义", () => {
+    it("inputSchema 应包含 category / q / count 三个字段", () => {
       registerNewsTools(mockToolRegistry as any);
       const schema = mockRegister.mock.calls[0][0].inputSchema;
-      expect(schema).toBeDefined();
-      expect(schema.type).toBe("object");
-      expect(schema.properties).toBeDefined();
       expect(schema.properties.category).toBeDefined();
+      expect(schema.properties.q).toBeDefined();
       expect(schema.properties.count).toBeDefined();
     });
   });
 
-  // ==================== getLatestNewsImpl ====================
-  describe("getLatestNewsImpl", () => {
-    // UTC-B1-1: 调用 get_latest_news 返回包含 title/url/source/publishedAt 的新闻数组
-    it("无参数调用应返回默认 5 条新闻", () => {
-      const result = JSON.parse(getLatestNewsImpl({}));
+  // ==================== 主源命中 ====================
+  describe("getLatestNewsImpl - NewsData.io 主源", () => {
+    it("无参数：使用 general 类目调用主源并返回 5 条", async () => {
+      fetchSpy.mockResolvedValueOnce(mockNewsDataResp(5));
+      const result = JSON.parse(await getLatestNewsImpl({}));
       expect(result.success).toBe(true);
-      expect(result.count).toBe(5);
+      expect(result.provider).toContain("newsdata.io");
       expect(result.news).toHaveLength(5);
+      expect(result.news[0]).toMatchObject({
+        title: expect.any(String),
+        url: expect.any(String),
+        source: expect.any(String),
+        publishedAt: expect.any(String),
+        summary: expect.any(String),
+      });
     });
 
-    it("每条新闻应包含 title/url/source/publishedAt/summary 字段", () => {
-      const result = JSON.parse(getLatestNewsImpl({}));
-      for (const item of result.news) {
-        expect(item).toHaveProperty("title");
-        expect(item).toHaveProperty("url");
-        expect(item).toHaveProperty("source");
-        expect(item).toHaveProperty("publishedAt");
-        expect(item).toHaveProperty("summary");
-        expect(typeof item.title).toBe("string");
-        expect(typeof item.url).toBe("string");
-        expect(typeof item.source).toBe("string");
-        expect(typeof item.publishedAt).toBe("string");
-      }
+    it("category='ai' 时主源会带上 AI 关键字检索", async () => {
+      fetchSpy.mockResolvedValueOnce(mockNewsDataResp(2));
+      const result = JSON.parse(
+        await getLatestNewsImpl({ category: "ai", count: 2 })
+      );
+      const calledUrl = fetchSpy.mock.calls[0][0] as string;
+      expect(calledUrl).toContain("category=technology");
+      expect(decodeURIComponent(calledUrl)).toMatch(/q=人工智能|AI|大模型/);
+      expect(result.count).toBe(2);
     });
 
-    // UTC-B1-2: 调用 get_latest_news({ category: "ai" }) 返回 AI 领域新闻
-    it("按 category='ai' 过滤应返回 AI 领域新闻", () => {
-      const result = JSON.parse(getLatestNewsImpl({ category: "ai" }));
+    it("count 超界时被裁剪到 1-10", async () => {
+      fetchSpy.mockResolvedValue(mockNewsDataResp(10));
+      const big = JSON.parse(await getLatestNewsImpl({ count: 100, q: "k1" }));
+      expect(big.count).toBeLessThanOrEqual(10);
+    });
+  });
+
+  // ==================== 主源失败回退备源 ====================
+  describe("getLatestNewsImpl - 备源回退", () => {
+    it("主源 502 → 自动回退到百度 RSS", async () => {
+      fetchSpy
+        .mockResolvedValueOnce(new Response("oops", { status: 502 }))
+        .mockResolvedValueOnce(mockBaiduRssResp(3));
+      const result = JSON.parse(
+        await getLatestNewsImpl({ category: "tech", count: 3, q: "rss-test" })
+      );
       expect(result.success).toBe(true);
-      expect(result.count).toBeGreaterThan(0);
-      // 所有返回的新闻都应该是 AI 分类（但返回结构中不含 category）
-      expect(result.news.length).toBeGreaterThan(0);
-    });
-
-    // UTC-B1-3: 调用 get_latest_news({ count: 3 }) 返回恰好 3 条新闻
-    it("指定 count=3 应返回恰好 3 条新闻", () => {
-      const result = JSON.parse(getLatestNewsImpl({ count: 3 }));
-      expect(result.success).toBe(true);
-      expect(result.count).toBe(3);
+      expect(result.provider).toBe("baidu-rss");
       expect(result.news).toHaveLength(3);
+      expect(result.news[0].source).toBe("百度新闻");
     });
 
-    // UTC-B1-4: 调用 get_latest_news({ category: "invalid_xxx" }) 返回空数组
-    it("无效分类应返回空数组", () => {
-      const result = JSON.parse(getLatestNewsImpl({ category: "invalid_xxx" }));
-      expect(result.success).toBe(true);
-      expect(result.count).toBe(0);
-      expect(result.news).toHaveLength(0);
-    });
-
-    it("count 超出范围时应被裁剪到 1-10", () => {
-      const resultMin = JSON.parse(getLatestNewsImpl({ count: 0 }));
-      expect(resultMin.count).toBeGreaterThanOrEqual(1);
-
-      const resultMax = JSON.parse(getLatestNewsImpl({ count: 100 }));
-      expect(resultMax.count).toBeLessThanOrEqual(10);
-    });
-
-    it("按 category='tech' 过滤应返回科技新闻", () => {
-      const result = JSON.parse(getLatestNewsImpl({ category: "tech" }));
-      expect(result.success).toBe(true);
-      expect(result.count).toBeGreaterThan(0);
-    });
-
-    it("按 category='sports' 过滤应返回体育新闻", () => {
-      const result = JSON.parse(getLatestNewsImpl({ category: "sports" }));
-      expect(result.success).toBe(true);
-      expect(result.count).toBeGreaterThan(0);
+    it("主备都失败时返回 success=false 友好错误", async () => {
+      fetchSpy.mockRejectedValue(new Error("network down"));
+      const result = JSON.parse(
+        await getLatestNewsImpl({ category: "sports", q: "fail-test" })
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("不可用");
     });
   });
 
   // ==================== callNewsTool ====================
   describe("callNewsTool", () => {
-    it("调用 get_latest_news 应返回有效 JSON", async () => {
-      const result = await callNewsTool("get_latest_news", {});
-      const parsed = JSON.parse(result);
-      expect(parsed.success).toBe(true);
-      expect(parsed.news).toBeDefined();
+    it("调用 get_latest_news 透传到 Impl", async () => {
+      fetchSpy.mockResolvedValueOnce(mockNewsDataResp(1));
+      const result = await callNewsTool("get_latest_news", { count: 1, q: "passthrough" });
+      expect(JSON.parse(result).success).toBe(true);
     });
 
     it("调用未知工具应返回错误", async () => {
       const result = await callNewsTool("unknown_tool", {});
-      const parsed = JSON.parse(result);
-      expect(parsed.error).toBeDefined();
+      expect(JSON.parse(result).error).toBeDefined();
     });
   });
 });

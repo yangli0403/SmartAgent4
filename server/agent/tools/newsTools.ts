@@ -1,11 +1,15 @@
 /**
- * News Tools — 新闻资讯工具集
+ * News Tools — 实时新闻资讯工具集
  *
- * 提供 get_latest_news 内置工具，支持按分类获取最新新闻。
- * 当前为 Mock 实现，返回预设的新闻数据，确保 Demo 演示稳定性。
- * 后续可平滑迁移为真实的新闻 API 调用。
+ * 提供 get_latest_news 内置工具，支持按分类与关键词获取实时新闻。
  *
- * 注册方式：内置工具（builtin），与 freeWeatherTools / memoryTools 模式一致。
+ * 数据源策略（双链路 + 内存缓存）：
+ *   1) 主：NewsData.io（需 NEWSDATA_API_KEY 环境变量），免费档 200 次/天，
+ *      返回中文新闻 JSON，字段稳定，含 description/source/pubDate。
+ *   2) 备：百度新闻 RSS（无需 Key），保证 Demo 永远不空。
+ *   3) 缓存：同一 (category,q) 在 5 分钟内复用上次成功结果，节省额度。
+ *
+ * 注册方式：内置工具（builtin），与 freeWeatherTools / memoryTools 一致。
  */
 import type { ToolRegistry } from "../../mcp/toolRegistry";
 
@@ -14,166 +18,213 @@ import type { ToolRegistry } from "../../mcp/toolRegistry";
 /** 内置新闻工具的 serverId */
 export const NEWS_TOOLS_SERVER_ID = "builtin-news-tools";
 
+/** 缓存有效期 5 分钟，足够应对一次 Demo 多轮提问 */
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+/** 单次请求最大返回条数 */
+const MAX_COUNT = 10;
+
+/** NewsData.io 接口地址 */
+const NEWSDATA_ENDPOINT = "https://newsdata.io/api/1/latest";
+
+/** 百度新闻 RSS（按分类）映射 */
+const BAIDU_RSS_BY_CATEGORY: Record<string, string> = {
+  ai: "http://news.baidu.com/n?cmd=1&class=internet&tn=rss",
+  tech: "http://news.baidu.com/n?cmd=1&class=internet&tn=rss",
+  business: "http://news.baidu.com/n?cmd=1&class=finannews&tn=rss",
+  sports: "http://news.baidu.com/n?cmd=1&class=sportnews&tn=rss",
+  entertainment: "http://news.baidu.com/n?cmd=1&class=enternews&tn=rss",
+  general: "http://news.baidu.com/n?cmd=1&class=civilnews&tn=rss",
+};
+
+/** 业务分类 → NewsData.io category 映射 */
+const NEWSDATA_CATEGORY_MAP: Record<string, string> = {
+  ai: "technology",
+  tech: "technology",
+  business: "business",
+  sports: "sports",
+  entertainment: "entertainment",
+  general: "top",
+};
+
 // ==================== 数据类型 ====================
 
-/** 新闻条目 */
+/** 标准化新闻条目 */
 export interface NewsItem {
   title: string;
   url: string;
   source: string;
   publishedAt: string;
   summary: string;
-  category: string;
 }
 
-// ==================== Mock 数据 ====================
+interface CacheEntry {
+  expireAt: number;
+  payload: { items: NewsItem[]; provider: string };
+}
 
-const MOCK_NEWS_DATABASE: NewsItem[] = [
-  // AI 类
-  {
-    title: "通义千问发布全新多模态大模型 Qwen3",
-    url: "https://example.com/news/qwen3",
-    source: "科技日报",
-    publishedAt: new Date().toISOString(),
-    summary: "阿里云发布通义千问 Qwen3 系列模型，在多模态理解和推理能力上取得重大突破。",
-    category: "ai",
-  },
-  {
-    title: "OpenAI 推出 GPT-5 模型，推理能力大幅提升",
-    url: "https://example.com/news/gpt5",
-    source: "36氪",
-    publishedAt: new Date().toISOString(),
-    summary: "OpenAI 正式发布 GPT-5，在数学推理、代码生成等任务上表现优异。",
-    category: "ai",
-  },
-  {
-    title: "国内首个车载大模型标准发布",
-    url: "https://example.com/news/car-llm-standard",
-    source: "汽车之家",
-    publishedAt: new Date().toISOString(),
-    summary: "中国汽车工程学会发布车载大模型技术标准，规范智能座舱 AI 应用。",
-    category: "ai",
-  },
-  // 科技类
-  {
-    title: "华为发布新一代智能驾驶芯片",
-    url: "https://example.com/news/huawei-chip",
-    source: "新浪科技",
-    publishedAt: new Date().toISOString(),
-    summary: "华为在春季发布会上推出新一代智能驾驶芯片，算力提升 3 倍。",
-    category: "tech",
-  },
-  {
-    title: "SpaceX 星舰第七次试飞成功回收",
-    url: "https://example.com/news/spacex",
-    source: "环球科技",
-    publishedAt: new Date().toISOString(),
-    summary: "SpaceX 星舰完成第七次试飞，成功实现助推器和飞船双回收。",
-    category: "tech",
-  },
-  {
-    title: "量子计算突破：1000 量子比特处理器问世",
-    url: "https://example.com/news/quantum",
-    source: "科学网",
-    publishedAt: new Date().toISOString(),
-    summary: "IBM 发布 1000 量子比特处理器，量子计算进入实用化新阶段。",
-    category: "tech",
-  },
-  // 商业类
-  {
-    title: "新能源汽车出口量创历史新高",
-    url: "https://example.com/news/ev-export",
-    source: "经济观察报",
-    publishedAt: new Date().toISOString(),
-    summary: "2026 年第一季度中国新能源汽车出口量同比增长 45%，创历史新高。",
-    category: "business",
-  },
-  {
-    title: "比亚迪发布全新智能座舱平台",
-    url: "https://example.com/news/byd-cockpit",
-    source: "第一财经",
-    publishedAt: new Date().toISOString(),
-    summary: "比亚迪发布全新一代智能座舱平台，搭载自研大模型和多模态交互系统。",
-    category: "business",
-  },
-  // 体育类
-  {
-    title: "中国女足亚洲杯小组赛三连胜",
-    url: "https://example.com/news/football",
-    source: "新华社",
-    publishedAt: new Date().toISOString(),
-    summary: "中国女足在亚洲杯小组赛中取得三连胜，以小组第一出线。",
-    category: "sports",
-  },
-  // 娱乐类
-  {
-    title: "国产科幻电影《流浪地球3》定档暑期",
-    url: "https://example.com/news/movie",
-    source: "猫眼电影",
-    publishedAt: new Date().toISOString(),
-    summary: "《流浪地球3》正式定档 2026 年暑期档，预告片首日播放量破亿。",
-    category: "entertainment",
-  },
-  // 综合类
-  {
-    title: "全国高温预警：多地气温突破 40 度",
-    url: "https://example.com/news/weather-hot",
-    source: "中国天气网",
-    publishedAt: new Date().toISOString(),
-    summary: "中央气象台发布高温橙色预警，全国多地气温将突破 40 度。",
-    category: "general",
-  },
-  {
-    title: "五一假期旅游市场火爆，出行人数预计超 3 亿",
-    url: "https://example.com/news/travel",
-    source: "人民日报",
-    publishedAt: new Date().toISOString(),
-    summary: "文旅部预计五一假期全国出行人数将超过 3 亿人次，旅游收入有望创新高。",
-    category: "general",
-  },
-];
+const cache = new Map<string, CacheEntry>();
+
+// ==================== NewsData.io 主源 ====================
+
+/** 调用 NewsData.io 拉取实时新闻 */
+async function fetchFromNewsDataIo(
+  category: string,
+  q: string | undefined,
+  count: number
+): Promise<NewsItem[] | null> {
+  const apiKey = process.env.NEWSDATA_API_KEY;
+  if (!apiKey || apiKey.trim().length === 0) {
+    return null; // 未配置 Key，跳过主源
+  }
+
+  const params = new URLSearchParams();
+  params.set("apikey", apiKey);
+  params.set("language", "zh");
+  params.set("size", String(Math.min(count, MAX_COUNT)));
+
+  const ndCategory = NEWSDATA_CATEGORY_MAP[category];
+  if (ndCategory) params.set("category", ndCategory);
+
+  if (q && q.trim().length > 0) params.set("q", q.trim());
+
+  // ai 分类：通过关键字增强（NewsData 没有 AI 子类，借助关键字过滤）
+  if (category === "ai" && (!q || q.trim().length === 0)) {
+    params.set("q", "人工智能 OR AI OR 大模型");
+  }
+
+  const url = `${NEWSDATA_ENDPOINT}?${params.toString()}`;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const resp = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return null;
+
+    const data = (await resp.json()) as {
+      status?: string;
+      results?: Array<{
+        title?: string;
+        link?: string;
+        source_name?: string;
+        source_id?: string;
+        pubDate?: string;
+        description?: string;
+      }>;
+    };
+    if (data.status !== "success" || !Array.isArray(data.results)) return null;
+
+    return data.results.slice(0, count).map((r) => ({
+      title: (r.title || "").trim(),
+      url: r.link || "",
+      source: r.source_name || r.source_id || "未知来源",
+      publishedAt: r.pubDate || new Date().toISOString(),
+      summary: (r.description || "").trim().slice(0, 200),
+    }));
+  } catch {
+    return null; // 网络/超时/解析失败，统一回退备源
+  }
+}
+
+// ==================== 百度 RSS 备源 ====================
+
+/** 极简 RSS 解析（仅取 item.title / link / pubDate / description），避免引入新依赖 */
+function parseRssItems(xml: string, count: number): NewsItem[] {
+  const items: NewsItem[] = [];
+  const itemBlocks = xml.split(/<item>|<item\s/i).slice(1);
+  for (const block of itemBlocks) {
+    if (items.length >= count) break;
+    const close = block.indexOf("</item>");
+    const seg = close >= 0 ? block.slice(0, close) : block;
+
+    const pickCData = (tag: string): string => {
+      const re = new RegExp(`<${tag}>\\s*(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?\\s*<\\/${tag}>`, "i");
+      const m = seg.match(re);
+      return m ? m[1].trim() : "";
+    };
+
+    const title = pickCData("title");
+    if (!title) continue;
+    items.push({
+      title,
+      url: pickCData("link"),
+      source: "百度新闻",
+      publishedAt: pickCData("pubDate") || new Date().toISOString(),
+      summary: pickCData("description").replace(/<[^>]+>/g, "").slice(0, 200),
+    });
+  }
+  return items;
+}
+
+/** 调用百度新闻 RSS 拉取（无需 Key） */
+async function fetchFromBaiduRss(category: string, count: number): Promise<NewsItem[] | null> {
+  const rssUrl = BAIDU_RSS_BY_CATEGORY[category] || BAIDU_RSS_BY_CATEGORY.general;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const resp = await fetch(rssUrl, {
+      signal: controller.signal,
+      headers: { "User-Agent": "Mozilla/5.0 SmartAgent4-NewsBot" },
+    });
+    clearTimeout(timer);
+    if (!resp.ok) return null;
+    const xml = await resp.text();
+    const items = parseRssItems(xml, count);
+    return items.length > 0 ? items : null;
+  } catch {
+    return null;
+  }
+}
 
 // ==================== 工具实现 ====================
 
 /**
- * get_latest_news — 获取最新新闻
- *
- * @param args 工具参数
- * @returns 新闻列表的 JSON 字符串
+ * get_latest_news — 获取实时新闻
  */
-export function getLatestNewsImpl(args: Record<string, unknown>): string {
-  const category = args.category as string | undefined;
-  const count = Math.min(Math.max(Number(args.count) || 5, 1), 10);
+export async function getLatestNewsImpl(args: Record<string, unknown>): Promise<string> {
+  const rawCategory = (args.category as string | undefined)?.toLowerCase().trim();
+  const category =
+    rawCategory && NEWSDATA_CATEGORY_MAP[rawCategory] ? rawCategory : "general";
+  const q = (args.q as string | undefined) ?? (args.query as string | undefined);
+  const count = Math.min(Math.max(Number(args.count) || 5, 1), MAX_COUNT);
 
-  let filtered = MOCK_NEWS_DATABASE;
-
-  // 按分类过滤
-  if (category && category !== "general") {
-    filtered = MOCK_NEWS_DATABASE.filter((n) => n.category === category);
-  }
-
-  // 截取指定数量
-  const result = filtered.slice(0, count);
-
-  if (result.length === 0) {
+  // 命中缓存
+  const cacheKey = `${category}::${(q || "").trim()}::${count}`;
+  const hit = cache.get(cacheKey);
+  if (hit && hit.expireAt > Date.now()) {
     return JSON.stringify({
       success: true,
-      count: 0,
-      news: [],
-      message: `未找到分类为 "${category}" 的新闻`,
+      provider: hit.payload.provider + "+cache",
+      count: hit.payload.items.length,
+      news: hit.payload.items,
     });
   }
 
+  // 主源
+  let items = await fetchFromNewsDataIo(category, q, count);
+  let provider = "newsdata.io";
+
+  // 备源
+  if (!items || items.length === 0) {
+    items = await fetchFromBaiduRss(category, count);
+    provider = "baidu-rss";
+  }
+
+  if (!items || items.length === 0) {
+    return JSON.stringify({
+      success: false,
+      provider,
+      error: "实时新闻源暂时不可用，请稍后再试。",
+    });
+  }
+
+  cache.set(cacheKey, { expireAt: Date.now() + CACHE_TTL_MS, payload: { items, provider } });
+
   return JSON.stringify({
     success: true,
-    count: result.length,
-    news: result.map((n) => ({
-      title: n.title,
-      url: n.url,
-      source: n.source,
-      publishedAt: n.publishedAt,
-      summary: n.summary,
-    })),
+    provider,
+    count: items.length,
+    news: items,
   });
 }
 
@@ -186,19 +237,24 @@ export function registerNewsTools(registry: ToolRegistry): void {
   registry.register({
     name: "get_latest_news",
     description:
-      "获取最新新闻资讯。支持按分类筛选（ai/tech/business/sports/entertainment/general），可指定返回条数（1-10）。",
+      "获取实时新闻资讯。可指定分类（ai/tech/business/sports/entertainment/general）与可选的关键词 q（用于精确搜索如\"特斯拉\"、\"OpenAI\"等），返回 1-10 条最新中文新闻。",
     inputSchema: {
       type: "object",
       properties: {
         category: {
           type: "string",
           description:
-            "新闻分类：ai（人工智能）、tech（科技）、business（商业）、sports（体育）、entertainment（娱乐）、general（综合）。默认返回所有分类。",
+            "新闻分类：ai（人工智能）、tech（科技）、business（商业财经）、sports（体育）、entertainment（娱乐）、general（综合头条）。默认 general。",
           enum: ["ai", "tech", "business", "sports", "entertainment", "general"],
+        },
+        q: {
+          type: "string",
+          description:
+            "可选搜索关键词，例如\"特斯拉\"、\"OpenAI\"、\"新能源\"，留空表示按分类拉取最新。",
         },
         count: {
           type: "number",
-          description: "返回的新闻条数，范围 1-10，默认为 5",
+          description: "返回新闻条数，范围 1-10，默认 5。",
         },
       },
       required: [],
@@ -217,7 +273,7 @@ export async function callNewsTool(
   args: Record<string, unknown>
 ): Promise<string> {
   if (toolName === "get_latest_news") {
-    return getLatestNewsImpl(args);
+    return await getLatestNewsImpl(args);
   }
   return JSON.stringify({ error: `未知的新闻工具: ${toolName}` });
 }

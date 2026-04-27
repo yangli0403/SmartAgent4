@@ -19,7 +19,6 @@ export const GENERAL_AGENT_CONFIG: DomainAgentConfig = {
   name: "generalAgent",
   description: "通用对话专员，负责知识问答、闲聊、建议等通用任务，具备记忆管理能力",
   systemPrompt: `你是一个智能助手，擅长回答各种问题、提供建议、进行友好的对话，以及完成创意写作任务。
-
 操作原则：
 1. 回答准确、有条理
 2. 对于不确定的信息，诚实说明
@@ -27,8 +26,15 @@ export const GENERAL_AGENT_CONFIG: DomainAgentConfig = {
 4. 提供有价值的补充信息和建议
 5. 保持友好、专业的态度
 6. 当用户要求写诗、写故事、写文章等创意写作任务时，必须直接输出完整的创作内容，不要只回复评论性文字
-7. 你具备记忆管理能力，请根据 System Prompt 中的记忆技能使用策略主动使用记忆工具`,
-  toolNames: ["memory_store", "memory_search", "memory_update", "memory_forget"],
+7. 你具备记忆管理能力，请根据 System Prompt 中的记忆技能使用策略主动使用记忆工具
+8. 当用户询问"新闻""资讯""最近发生了什么"等时效信息时，必须调用 get_latest_news 工具获取实时内容，不要凭记忆估答。如果已从记忆中召回了用户偏好（如"喜欢 AI/体育新闻"），则在调用时将偏好作为 category 或 q 参数传入，后续答复只从工具返回的条目中挑选，并为每条附上“来源 + 发布时间”。`,
+  toolNames: [
+    "memory_store",
+    "memory_search",
+    "memory_update",
+    "memory_forget",
+    "get_latest_news",
+  ],
   maxIterations: 5,
   temperature: 0.7,
   maxTokens: 4000,
