@@ -28,6 +28,7 @@ import { RealtimeAsrSession } from "@/lib/realtimeAsrStream";
 import { AiriStageContainer } from "@/components/airi-stage/AiriStageContainer";
 import { dispatchStageEventsFromTags, notifyThinking, notifyIdle } from "@/lib/airi-stage/stageEventBus";
 import { parseEmotionTags } from "@/lib/emotionParser";
+import { useOmniMode } from "@/hooks/useOmniMode";
 
 /** Ark LLM 代理地址（轻量级直连模式） */
 const ARK_PROXY_URL = import.meta.env.VITE_ARK_PROXY_URL || "";
@@ -73,6 +74,10 @@ export default function Cockpit() {
   const [isMicActive, setIsMicActive] = useState(false);
   const asrSessionRef = useRef<RealtimeAsrSession | null>(null);
   const asrCommittedRef = useRef("");
+
+  // Omni 端到端语音模式
+  const { isOmniMode, toggleOmniMode, omniState, transcript, replyText } = useOmniMode();
+
   // 人格切换状态
   const [characterId, setCharacterId] = useState<string>("xiaozhi");
 
@@ -436,9 +441,43 @@ export default function Cockpit() {
               <line x1="12" y1="19" x2="12" y2="23" />
               <line x1="8" y1="23" x2="16" y2="23" />
             </svg>
-            <span>副驾语音</span>
+            <span>副馾语音</span>
           </button>
         </div>
+
+        {/* Omni 端到端语音模式 */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void toggleOmniMode()}
+            className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-medium transition-all ${
+              isOmniMode
+                ? "bg-purple-500 text-white shadow-lg shadow-purple-500/30"
+                : "bg-white/10 backdrop-blur-md text-white/80 border border-white/20 hover:bg-white/20"
+            }`}
+          >
+            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M8 12h8" />
+              <path d="M12 8v8" />
+            </svg>
+            <span>
+              {isOmniMode
+                ? omniState === "connected" ? "Omni 对话中" : "Omni 连接中..."
+                : "Omni 模式"}
+            </span>
+          </button>
+          {isOmniMode && omniState === "connected" && (
+            <span className="text-[10px] text-green-400 animate-pulse">● 已连接</span>
+          )}
+        </div>
+
+        {/* Omni 实时转写/回复显示 */}
+        {isOmniMode && (transcript || replyText) && (
+          <div className="bg-white/10 backdrop-blur-md rounded-xl border border-white/15 px-3 py-2 text-xs text-white/80 max-h-24 overflow-y-auto">
+            {transcript && <p className="text-white/60"><span className="text-blue-300">我:</span> {transcript}</p>}
+            {replyText && <p className="mt-1"><span className="text-purple-300">AI:</span> {replyText}</p>}
+          </div>
+        )}
 
         {/* 输入框 */}
         <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15 px-3 py-1.5">
