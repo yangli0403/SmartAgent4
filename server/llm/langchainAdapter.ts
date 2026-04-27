@@ -113,8 +113,15 @@ export function createToolCallingLLM(
  * @param userMessage - 用户消息
  * @param options - LLM 配置选项
  * @returns 解析后的 JSON 对象
+ *
+ * 注：langsmith.traceable 在包裹后会擦除内部泛型，这里为函数常量
+ * 重新描述一个带 <T> 的调用签名，让调用点 能推出返回类型。
  */
-export const callLLMStructured = traceable(
+export const callLLMStructured: <T>(
+  systemPrompt: string,
+  userMessage: string,
+  options?: LLMAdapterOptions
+) => Promise<T> = traceable(
   async function callLLMStructured<T>(
     systemPrompt: string,
     userMessage: string,

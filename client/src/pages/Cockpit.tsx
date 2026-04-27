@@ -138,7 +138,7 @@ export default function Cockpit() {
       setMessages((prev) =>
         prev.map((m) =>
           m.role === "thinking" && m.status === "running"
-            ? { ...m, status: "failed" as const, headline: "Metris Agent 思考失败", endedAt: Date.now() }
+            ? { ...m, status: "error" as const, headline: "Metris Agent 思考失败", endedAt: Date.now() }
             : m
         )
       );

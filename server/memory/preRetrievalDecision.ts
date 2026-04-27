@@ -205,9 +205,7 @@ export async function llmBasedDecision(
     .map((d) => `${d.role === "user" ? "用户" : "助手"}: ${d.content}`)
     .join("\n");
 
-  const prompt = `${LLM_DECISION_PROMPT}
-
-## 最近对话
+  const userBlock = `## 最近对话
 ${contextLines || "（无历史对话）"}
 
 ## 用户最新消息
@@ -217,7 +215,7 @@ ${userQuery}
 
   try {
     const response = await Promise.race([
-      callLLMText(prompt),
+      callLLMText(LLM_DECISION_PROMPT, userBlock),
       new Promise<string>((_, reject) =>
         setTimeout(() => reject(new Error("LLM 超时")), mergedConfig.llmTimeoutMs)
       ),
@@ -299,9 +297,7 @@ export async function rewriteQuery(
     .map((d) => `${d.role === "user" ? "用户" : "助手"}: ${d.content}`)
     .join("\n");
 
-  const prompt = `${QUERY_REWRITE_PROMPT}
-
-最近对话：
+  const userBlock = `最近对话：
 ${contextLines}
 
 用户最新查询：${userQuery}
@@ -310,7 +306,7 @@ ${contextLines}
 
   try {
     const response = await Promise.race([
-      callLLMText(prompt),
+      callLLMText(QUERY_REWRITE_PROMPT, userBlock),
       new Promise<string>((_, reject) =>
         setTimeout(() => reject(new Error("LLM 超时")), mergedConfig.llmTimeoutMs)
       ),

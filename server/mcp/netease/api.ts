@@ -1,4 +1,4 @@
-// @ts-expect-error: @neteasecloudmusicapienhanced/api 是 CommonJS 模块，使用默认导入以兼容 ESM
+// @ts-ignore - @neteasecloudmusicapienhanced/api 是 CommonJS 模块，使用默认导入以兼容 ESM。
 import pkg from "@neteasecloudmusicapienhanced/api";
 
 const {

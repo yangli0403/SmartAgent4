@@ -305,8 +305,9 @@ export async function executeBackfillExtraction(
     // 1. 获取工作记忆中的对话历史
     // 尝试从所有可能的 sessionId 获取（做梦时可能没有活跃 session）
     const workingMemoryData = getWorkingMemory(userId, "default");
+    // 注：getWorkingMemory 直接返回消息数组（不是 {messages:[...]} 包装）。
     const conversations: Array<{ role: string; content: string }> =
-      workingMemoryData?.messages || [];
+      Array.isArray(workingMemoryData) ? workingMemoryData : [];
 
     if (conversations.length < 2) {
       console.log(

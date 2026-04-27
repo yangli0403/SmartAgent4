@@ -14,7 +14,7 @@ import {
   type EmotionTag,
 } from "@/lib/emotionParser";
 import { Streamdown } from "streamdown";
-import type { ChatUiMessage, ChatUiThinkingMessage } from "@shared/chatTts";
+import type { ChatUiAssistantMessage, ChatUiMessage, ChatUiThinkingMessage } from "@shared/chatTts";
 import { ThinkingBubble } from "./ThinkingBubble";
 import { TtsPlayback } from "@/components/TtsPlayback";
 
@@ -165,7 +165,7 @@ function AssistantMessage({
   isSynthesizing,
 }: {
   content: string;
-  tts?: ChatUiMessage["tts"];
+  tts?: ChatUiAssistantMessage["tts"];
   lazyTts?: boolean;
   onSynthesize?: () => void;
   isSynthesizing?: boolean;

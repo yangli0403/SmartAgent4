@@ -215,7 +215,7 @@ async function findDuplicates(params: Record<string, unknown>) {
       group.push(file);
       nameMap.set(name, group);
     }
-    const sameNameGroups: unknown[] = [];
+    const sameNameGroups: Array<{ count: number; [k: string]: unknown }> = [];
     for (const [, group] of nameMap) {
       if (group.length > 1) {
         const totalSize = group.reduce((sum, f) => sum + f.size, 0);
@@ -244,7 +244,7 @@ async function findDuplicates(params: Record<string, unknown>) {
       group.push(file);
       sizeMap.set(file.size, group);
     }
-    const exactDuplicateGroups: unknown[] = [];
+    const exactDuplicateGroups: Array<{ savableSize: number; [k: string]: unknown }> = [];
     let totalSavableSize = 0;
     for (const [size, group] of sizeMap) {
       if (group.length < 2) continue;

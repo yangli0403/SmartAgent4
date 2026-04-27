@@ -82,9 +82,9 @@ async function memoryStoreImpl(args: Record<string, unknown>): Promise<string> {
 
     if (auditResult.verdict === "REJECT") {
       console.log(
-        `[MemoryTools] 审计拒绝: ${auditResult.reason}`
+        `[MemoryTools] 审计拒绝: ${auditResult.feedbackMessage}`
       );
-      return `记忆未存储：${auditResult.reason}`;
+      return `记忆未存储：${auditResult.feedbackMessage}`;
     }
 
     if (auditResult.verdict === "MERGE" && auditResult.matchedMemory) {

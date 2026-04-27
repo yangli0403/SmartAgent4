@@ -12,7 +12,6 @@ const baseMsg = (
   overrides: Partial<ChatUiThinkingMessage> = {}
 ): ChatUiThinkingMessage => ({
   role: "thinking",
-  content: "",
   requestId: "req-1",
   status: "running",
   headline: "Metris Agent 思考中...",
@@ -40,11 +39,11 @@ describe("US-6 ThinkingBubble", () => {
     expect(screen.getByText(/Metris Agent 已完成思考/i)).toBeInTheDocument();
   });
 
-  it("U-TB-3：failed 态显示失败文案与红色样式标记", () => {
+  it("U-TB-3：error 态显示失败文案与红色样式标记", () => {
     const { container } = render(
       <ThinkingBubble
         message={baseMsg({
-          status: "failed",
+          status: "error",
           headline: "Metris Agent 思考失败",
           endedAt: Date.now(),
         })}
@@ -53,7 +52,7 @@ describe("US-6 ThinkingBubble", () => {
     expect(screen.getByText(/思考失败/i)).toBeInTheDocument();
     // data-status 用于无样式断言
     expect(
-      container.querySelector('[data-thinking-status="failed"]')
+      container.querySelector('[data-thinking-status="error"]')
     ).toBeTruthy();
   });
 

@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { getLoginUrl } from "@/const";
 import type { ChatUiMessage } from "@shared/chatTts";
 import { TtsPlayback } from "@/components/TtsPlayback";
+import { ThinkingBubble } from "@/components/cockpit/ThinkingBubble";
 import {
   Dialog,
   DialogContent,
@@ -356,6 +357,8 @@ export default function Chat() {
                           }
                         />
                       </>
+                    ) : msg.role === "thinking" ? (
+                      <ThinkingBubble message={msg} />
                     ) : (
                       <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                     )}

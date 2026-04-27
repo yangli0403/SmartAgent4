@@ -39,6 +39,7 @@ import type {
   DelegateRequest,
   DelegateResult,
 } from "../discovery/types";
+import { formatDialogueSlotsForTask } from "../supervisor/dialogueSlots";
 
 // ==================== 常量 ====================
 

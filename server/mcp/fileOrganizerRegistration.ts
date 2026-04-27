@@ -71,15 +71,15 @@ function zodFieldToJsonSchema(field: z.ZodType): Record<string, unknown> {
   if (field instanceof z.ZodArray) {
     return {
       type: "array",
-      items: zodFieldToJsonSchema(field.element),
+      items: zodFieldToJsonSchema(field.element as unknown as z.ZodType),
       description: field.description,
     };
   }
   if (field instanceof z.ZodOptional) {
-    return zodFieldToJsonSchema(field.unwrap());
+    return zodFieldToJsonSchema(field.unwrap() as unknown as z.ZodType);
   }
   if (field instanceof z.ZodDefault) {
-    const inner = zodFieldToJsonSchema(field.removeDefault());
+    const inner = zodFieldToJsonSchema(field.removeDefault() as unknown as z.ZodType);
     const defaultVal = typeof field._def.defaultValue === 'function'
       ? field._def.defaultValue()
       : field._def.defaultValue;

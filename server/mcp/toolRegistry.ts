@@ -20,7 +20,11 @@ export type ToolCategory =
   | "file_system"
   | "app_browser"
   | "navigation"
-  | "multimedia";
+  | "multimedia"
+  | "office"
+  | "service"
+  | "general"
+  | "system";
 
 // ==================== 工具效用更新 ====================
 
@@ -34,7 +38,11 @@ export interface ToolUtilityUpdate {
 
 // ==================== 注册工具 ====================
 
-/** 注册到 Registry 中的工具（v2 — 含效用分数） */
+/** 注册到 Registry 中的工具（v2 — 含效用分数）
+ *
+ * 存储型（内部表示）中所有统计字段都是必填，这样 updateUtility 中
+ * 可以直接 successCount += 1 而不需反复判空。
+ */
 export interface RegisteredTool {
   /** 工具名称（全局唯一） */
   name: string;
@@ -61,6 +69,21 @@ export interface RegisteredTool {
 }
 
 /**
+ * 注册入参类型：外部仅需提供业务字段，4 个运行时统计字段可省略，
+ * register() 会以 0.5 / 0 作为默认值补齐。
+ */
+export type RegisteredToolInput = Omit<
+  RegisteredTool,
+  "utilityScore" | "successCount" | "failureCount" | "avgExecutionTimeMs"
+> &
+  Partial<
+    Pick<
+      RegisteredTool,
+      "utilityScore" | "successCount" | "failureCount" | "avgExecutionTimeMs"
+    >
+  >;
+
+/**
  * LangGraph 兼容的工具定义
  *
  * 用于 LLM 的 function calling（bind_tools）。
@@ -80,8 +103,8 @@ export interface LangGraphToolDefinition {
  * Tool Registry 接口（v2 — 含效用分数管理）
  */
 export interface IToolRegistry {
-  register(tool: RegisteredTool): void;
-  registerBatch(tools: RegisteredTool[]): void;
+  register(tool: RegisteredToolInput): void;
+  registerBatch(tools: RegisteredToolInput[]): void;
   unregister(toolName: string): void;
   unregisterByServer(serverId: string): void;
   get(toolName: string): RegisteredTool | undefined;
@@ -123,7 +146,7 @@ export class ToolRegistry implements IToolRegistry {
   /** EMA 平滑因子：越大越重视最近的调用结果 */
   private readonly EMA_ALPHA = 0.3;
 
-  register(tool: RegisteredTool): void {
+  register(tool: RegisteredToolInput): void {
     if (this.tools.has(tool.name)) {
       console.warn(
         `[ToolRegistry] Tool "${tool.name}" already registered, overwriting.`
@@ -140,7 +163,7 @@ export class ToolRegistry implements IToolRegistry {
     });
   }
 
-  registerBatch(tools: RegisteredTool[]): void {
+  registerBatch(tools: RegisteredToolInput[]): void {
     for (const tool of tools) {
       this.register(tool);
     }
