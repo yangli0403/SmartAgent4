@@ -38,6 +38,12 @@ export interface StreamingContext {
   finalPublished?: boolean;
   /** 是否已发布过 memory_recalled */
   memoryRecalledPublished?: boolean;
+  /** 是否已发布过 responding（开始生成最终回复） */
+  respondingPublished?: boolean;
+  /** responding 事件发出时刻，用于推算 LLM 生成耗时 */
+  respondingStartedAt?: number;
+  /** 是否已发布过 reflecting（开始反思入库） */
+  reflectingPublished?: boolean;
   /** 是否已发布过 reflected */
   reflectedPublished?: boolean;
   /** 是否已发布过 memory_extracted */
@@ -222,6 +228,27 @@ export function publishEventsFromUpdates(
     }
   }
 
+  // 5.2 responding（进入 respondNode：出现 finalResponse 且没有经过 reflection）
+  // 实际上 respondNode 是在一次 LangGraph chunk 中返回 finalResponse 的，
+  // 那个瞬间 LLM 生成已经完成；但我们在发布 final 之前仍可以先打一条
+  // "responding"，让前端 “step_finished → 生成回复中 → 反思中 → 完成” 连贯不中断。
+  if (
+    update.finalResponse &&
+    !ctx.respondingPublished &&
+    !ctx.finalPublished
+  ) {
+    ctx.respondingStartedAt = Date.now();
+    publishSupervisorEvent({
+      requestId: ctx.requestId,
+      type: "responding",
+      phase: "responding",
+      summary: `正在生成回复·汇总所有步骤结果`,
+      payload: { length: update.finalResponse.length },
+    });
+    ctx.respondingPublished = true;
+    published++;
+  }
+
   // 5. replan
   if (typeof update.replanCount === "number") {
     const last = ctx.lastReplanCount ?? 0;
@@ -238,6 +265,25 @@ export function publishEventsFromUpdates(
     } else {
       ctx.lastReplanCount = update.replanCount;
     }
+  }
+
+  // 5.4 reflecting（进入 reflectionNode、memoryExtractionNode 之前，但所有 step 已完）
+  // LangGraph 节点为序列执行：respond → memoryExtract → reflection，
+  // 在 finalResponse 出现后、reflectionMeta 未出现之前这段时间，正是“反思中”。
+  if (
+    update.finalResponse &&
+    !ctx.reflectingPublished &&
+    !update.reflectionMeta
+  ) {
+    publishSupervisorEvent({
+      requestId: ctx.requestId,
+      type: "reflecting",
+      phase: "reflecting",
+      summary: `正在反思入库·记录工具效用与记忆`,
+      payload: {},
+    });
+    ctx.reflectingPublished = true;
+    published++;
   }
 
   // 5.5 reflected【v0.6 新增】
@@ -283,8 +329,12 @@ export function publishEventsFromUpdates(
     published++;
   }
 
-  // 6. final
-  if (update.finalResponse && !ctx.finalPublished) {
+  // 6. final（只在 reflection 完成后才发布，以保证结束于“反思入库”之后）
+  if (
+    update.finalResponse &&
+    !ctx.finalPublished &&
+    (ctx.reflectedPublished || update.reflectionMeta)
+  ) {
     publishSupervisorEvent({
       requestId: ctx.requestId,
       type: "final",

@@ -239,6 +239,25 @@ export class ContextManager implements IContextManager {
           const address = [data.country, data.regionName, data.city]
             .filter(Boolean)
             .join(" ");
+          // 可疑 VPN/代理降级：服务面向中文用户，若 IP 被定位到中国大陆以外
+          // （经纬度粗略判断）则视为“不可靠”定位，给下游一个信息但不强制写入。
+          // 粗略边界：lat ≈3~54, lon ≈73~136。
+          const withinChina =
+            data.lat >= 3 && data.lat <= 54 &&
+            data.lon >= 73 && data.lon <= 136;
+          const countryLooksCN =
+            !data.country || /china|中国/i.test(String(data.country));
+          if (!withinChina || !countryLooksCN) {
+            console.warn(
+              `[ContextManager] IP geo looks unreliable (country=${data.country}, city=${city}, lat=${data.lat}, lon=${data.lon}), likely VPN/proxy. Marking as lowConfidence.`
+            );
+            return {
+              latitude: data.lat,
+              longitude: data.lon,
+              city: undefined,        // 不把境外城市名传下游，避免干扰 dialogueSlots / Prompt
+              address: `定位不可靠（可能开启代理）：${address}`,
+            };
+          }
           console.log(
             `[ContextManager] IP location via ip-api.com: ${city} (${data.lat}, ${data.lon})`
           );

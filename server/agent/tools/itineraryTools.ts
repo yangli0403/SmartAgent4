@@ -20,10 +20,13 @@ const AMAP_BASE = "https://restapi.amap.com/v3";
 /**
  * 使用 node:https 模块发起 GET 请求，绕过 undici 全局 dispatcher 的连接池问题。
  * 在服务进程中，MCP SSE 长连接可能占用 undici 连接池导致 ECONNRESET。
+ *
+ * 抗抖动重试：对 ECONNRESET / timeout / TLS 握手失败自动重试一次，
+ * 避免 generate_itinerary 等批量调用被单次网络波动拖到几百秒。
  */
-function httpsGet(url: string): Promise<any> {
+function httpsGetOnce(url: string, timeoutMs: number): Promise<any> {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { timeout: 15000 }, (res) => {
+    const req = https.get(url, { timeout: timeoutMs }, (res) => {
       let data = "";
       res.on("data", (chunk: Buffer) => { data += chunk.toString(); });
       res.on("end", () => {
@@ -36,6 +39,22 @@ function httpsGet(url: string): Promise<any> {
     });
     req.on("error", reject);
     req.on("timeout", () => { req.destroy(); reject(new Error("Request timeout")); });
+  });
+}
+
+function httpsGet(url: string): Promise<any> {
+  return httpsGetOnce(url, 10000).catch(async (err: any) => {
+    const msg = String(err?.message || err);
+    const code = err?.code;
+    const retryable =
+      code === "ECONNRESET" ||
+      code === "ETIMEDOUT" ||
+      code === "EAI_AGAIN" ||
+      /timeout|socket disconnected|ECONNRESET|TLS/i.test(msg);
+    if (!retryable) throw err;
+    console.warn(`[ItineraryTools] httpsGet retry once due to: ${msg}`);
+    await new Promise((r) => setTimeout(r, 400));
+    return httpsGetOnce(url, 8000);
   });
 }
 
@@ -293,13 +312,17 @@ async function generateRealItinerary(
   const cityCenter = geo ? `${geo.lng},${geo.lat}` : "";
   const cityName = geo?.city || destination;
 
-  // 2. 搜索 POI
-  const [attractions, restaurants, hotels, breakfastPlaces] = await Promise.all([
+  // 2. 搜索 POI（任一项失败不影响其他项，保证整体不被单点网络抖动拖垮）
+  const [aRes, rRes, hRes, bRes] = await Promise.allSettled([
     amapPOISearch(`${destination} 景点`, cityName, "110000", 10),
     amapPOISearch(`${destination} 特色餐厅`, cityName, "050000", 8),
     amapPOISearch(`${destination} 酒店`, cityName, "100000", 3),
     amapPOISearch(`${destination} 早餐`, cityName, "050000", 3),
   ]);
+  const attractions = aRes.status === "fulfilled" ? aRes.value : [];
+  const restaurants = rRes.status === "fulfilled" ? rRes.value : [];
+  const hotels = hRes.status === "fulfilled" ? hRes.value : [];
+  const breakfastPlaces = bRes.status === "fulfilled" ? bRes.value : [];
 
   console.log(`[ItineraryTools] Found: ${attractions.length} attractions, ${restaurants.length} restaurants, ${hotels.length} hotels`);
 

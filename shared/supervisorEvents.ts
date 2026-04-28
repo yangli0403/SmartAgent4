@@ -19,6 +19,8 @@ export type SupervisorEventType =
   | "step_started"
   | "step_finished"
   | "replan"
+  | "responding"
+  | "reflecting"
   | "reflected"
   | "memory_extracted"
   | "final"

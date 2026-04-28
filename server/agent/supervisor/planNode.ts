@@ -118,9 +118,23 @@ export async function planNode(
   if (state.context) {
     planRequest += `\n\n用户上下文:`;
     if (state.context.location) {
-      planRequest += `\n- 位置: ${state.context.location.city || "未知"} (${state.context.location.latitude}, ${state.context.location.longitude})`;
+      const loc = state.context.location;
+      const addrStr = (loc as any).address as string | undefined;
+      // 上游 ContextManager 检测到"跨境/代理"场景时，address 会被标记为
+      // "定位不可靠（可能开启代理）：xxx"，同时 city 为 undefined，
+      // 这里赋予明确提示，让 LLM 在规划中优先从"用户原话 / dialogueSlots / 记忆常住地"推断起点。
+      const looksUnreliable =
+        !loc.city &&
+        typeof addrStr === "string" &&
+        /定位不可靠|代理|VPN/i.test(addrStr);
+      if (looksUnreliable) {
+        planRequest += `\n- 位置: 不可靠（IP 被定位到境外，可能开启代理/VPN，供参考坐标 ${loc.latitude}, ${loc.longitude}）`;
+        planRequest += `\n- 请优先从用户原话、对话槽位、记忆常住地推断起点与城市；若仍不能确定，则在计划中加一步 generalAgent 向用户反问"出发地"，不要将 IP 定位作为事实使用。`;
+      } else {
+        planRequest += `\n- 位置: ${loc.city || "未知"} (${loc.latitude}, ${loc.longitude})`;
+      }
     } else {
-      planRequest += `\n- 位置: 未知（可能需要先通过 IP 定位获取）`;
+      planRequest += `\n- 位置: 未知（优先从用户原话/对话槽位/常住地记忆推断；必要时才调用 IP 定位并明确标记不确定性）`;
     }
     planRequest += `\n- 时间: ${state.context.currentTime}`;
     planRequest += `\n- 平台: ${state.context.platform}`;

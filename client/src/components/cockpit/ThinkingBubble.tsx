@@ -25,11 +25,100 @@ const PHASE_LABEL: Record<string, string> = {
   step_running: "步骤执行",
   step_finished: "步骤完成",
   replan: "重新规划",
+  responding: "生成回复",
+  reflecting: "反思中",
   reflected: "反思入库",
   memory_extracted: "记忆提取",
   completed: "完成",
   error: "异常",
 };
+
+/**
+ * 为每个 phase 返回一套醒目的胶囊样式（背景+文字+点的颜色）。
+ * 视觉目标：让 [召回记忆] / [任务分类] / [生成计划] / [步骤完成] 等标签
+ * 在灰色/浅色详情列表里一眼可辨。
+ */
+function getPhaseChipStyle(phase: string): {
+  container: string;
+  dot: string;
+} {
+  switch (phase) {
+    case "memory_recalled":
+      return {
+        container:
+          "bg-purple-100 text-purple-700 ring-1 ring-purple-200",
+        dot: "bg-purple-500",
+      };
+    case "classified":
+      return {
+        container:
+          "bg-sky-100 text-sky-700 ring-1 ring-sky-200",
+        dot: "bg-sky-500",
+      };
+    case "plan_ready":
+      return {
+        container:
+          "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200",
+        dot: "bg-indigo-500",
+      };
+    case "step_running":
+      return {
+        container:
+          "bg-amber-100 text-amber-700 ring-1 ring-amber-200",
+        dot: "bg-amber-500",
+      };
+    case "step_finished":
+      return {
+        container:
+          "bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200",
+        dot: "bg-emerald-500",
+      };
+    case "replan":
+      return {
+        container:
+          "bg-orange-100 text-orange-700 ring-1 ring-orange-200",
+        dot: "bg-orange-500",
+      };
+    case "responding":
+      return {
+        container:
+          "bg-yellow-100 text-yellow-800 ring-1 ring-yellow-300",
+        // 在“生成回复中”这种过渡态加个脉冲动画，明确告知用户还在工作
+        dot: "bg-yellow-500 animate-pulse",
+      };
+    case "reflecting":
+      return {
+        container:
+          "bg-cyan-100 text-cyan-700 ring-1 ring-cyan-200",
+        dot: "bg-cyan-500 animate-pulse",
+      };
+    case "reflected":
+    case "memory_extracted":
+      return {
+        container:
+          "bg-teal-100 text-teal-700 ring-1 ring-teal-200",
+        dot: "bg-teal-500",
+      };
+    case "completed":
+      return {
+        container:
+          "bg-emerald-600 text-white ring-1 ring-emerald-700",
+        dot: "bg-white",
+      };
+    case "error":
+      return {
+        container:
+          "bg-red-100 text-red-700 ring-1 ring-red-200",
+        dot: "bg-red-500",
+      };
+    default:
+      return {
+        container:
+          "bg-slate-200 text-slate-700 ring-1 ring-slate-300",
+        dot: "bg-slate-500",
+      };
+  }
+}
 
 /**
  * 以 payload 补充一句话摘要，让用户一眼看到"关键事实"
@@ -131,17 +220,24 @@ export function ThinkingBubble({
       </div>
 
       {message.details && message.details.length > 0 && (
-        <ul className="mt-2 space-y-1.5 border-l border-current/30 pl-3">
+        <ul className="mt-2 space-y-2 border-l border-current/30 pl-3">
           {message.details.map((d, idx) => {
             const hints = expanded ? renderPayloadHints(d.phase, d.payload) : null;
+            const chip = getPhaseChipStyle(d.phase);
+            const label = PHASE_LABEL[d.phase] ?? d.phase;
             return (
               <li key={`${d.ts}-${idx}`} className="text-[11px] leading-snug">
-                <span className="opacity-60 mr-1">
-                  [{PHASE_LABEL[d.phase] ?? d.phase}]
-                </span>
-                <span>{d.summary}</span>
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide whitespace-nowrap ${chip.container}`}
+                  >
+                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${chip.dot}`} />
+                    {label}
+                  </span>
+                  <span className="font-medium text-slate-800">{d.summary}</span>
+                </div>
                 {hints && (
-                  <pre className="mt-0.5 ml-2 whitespace-pre-wrap font-sans text-[10px] opacity-75">
+                  <pre className="mt-1 ml-2 whitespace-pre-wrap font-sans text-[10px] text-slate-600/90 leading-relaxed">
                     {hints}
                   </pre>
                 )}

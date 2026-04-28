@@ -32,7 +32,10 @@ export const RESPOND_SYSTEM_PROMPT = `你是 SmartAgent，一个智能、有记�
 5. 如果执行失败，诚实告知并提供替代建议
 6. 根据用户的性格偏好调整回复风格
 7. 不要暴露内部的步骤编号、Agent名称等技术细节
-8. 使用用户的语言（中文）回复`;
+8. 使用用户的语言（中文）回复
+9. 【行程/计划/时间表类任务】如果执行结果中已经包含 markdown 时间表（含 "| 时间 | ... |" 表头或 HH:mm-HH:mm 时段），
+   必须原样保留该时间表（按天分组、按时间顺序），禁止改写为一段散文；可以在表格前后补充一两句简短开场白和结束语，
+   但禁止删除时间列、合并行、或将多个 stop 折叠成一句话。`;
 
 /**
  * 回复生成节点（增强版）
@@ -141,6 +144,38 @@ ${agentOutput}
         finalResponse: agentOutput,
       };
     }
+  }
+
+  // === 行程类短路：generate_itinerary 已生成 markdown 时间表，直接透传，避免 LLM 二次汇总改写为散文 ===
+  try {
+    const itineraryStep = [...stepResults].reverse().find((r) => {
+      const out = (r as any).output;
+      if (!out || typeof out !== "string") return false;
+      // generate_itinerary 实际返回 JSON 字符串：{ success, itinerary, formattedText }
+      return /\"formattedText\"\s*:/.test(out) || /\| ?时间 ?\|/.test(out);
+    });
+    if (itineraryStep) {
+      let formatted: string | undefined;
+      const outStr = String((itineraryStep as any).output);
+      try {
+        const parsed = JSON.parse(outStr);
+        if (parsed && typeof parsed.formattedText === "string" && parsed.formattedText.length > 50) {
+          formatted = parsed.formattedText as string;
+        }
+      } catch { /* ignore parse error */ }
+      // 兼容：直接是 markdown 表格（极少数情况）
+      if (!formatted && /\| ?时间 ?\|/.test(outStr)) formatted = outStr;
+      if (formatted) {
+        const opener = `[expression:smile] 已为你生成结构化行程，按时间顺序如下：`;
+        const closer = `\n\n[animation:nod] 如需调整节奏（更紧凑/更宽松），或替换某餐/某景点，告诉我哪一段我帮你改。`;
+        const finalText = `${opener}\n\n${formatted}${closer}`;
+        console.log(`[RespondNode] Itinerary detected, bypassing LLM summary (${finalText.length} chars)`);
+        const aiMsg = new AIMessage(finalText);
+        return { messages: [aiMsg], finalResponse: finalText };
+      }
+    }
+  } catch (e) {
+    console.warn("[RespondNode] itinerary passthrough failed:", (e as Error).message);
   }
 
   // === 构建增强的 System Prompt ===

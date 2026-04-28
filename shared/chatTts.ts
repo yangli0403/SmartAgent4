@@ -36,6 +36,8 @@ export type ChatThinkingPhase =
   | "step_running"
   | "step_finished"
   | "replan"
+  | "responding"
+  | "reflecting"
   | "reflected"
   | "memory_extracted"
   | "completed"
