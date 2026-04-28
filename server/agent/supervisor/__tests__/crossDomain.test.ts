@@ -127,7 +127,7 @@ describe("Cross-Domain Collaboration", () => {
         id: 2,
         description: "将行程规划结果发送到飞书群",
         targetAgent: "officeAgent",
-        expectedTools: ["feishu_send_message"],
+        expectedTools: ["im_v1_message_create"],
         dependsOn: [1],
         inputMapping: {
           itineraryData: "step_1.output",
@@ -160,7 +160,7 @@ describe("Cross-Domain Collaboration", () => {
         id: 2,
         description: "发送行程到飞书",
         targetAgent: "officeAgent",
-        expectedTools: ["feishu_send_message"],
+        expectedTools: ["im_v1_message_create"],
         dependsOn: [1],
         inputMapping: {
           destination: "step_1.destination",
@@ -187,7 +187,7 @@ describe("Cross-Domain Collaboration", () => {
         id: 3,
         description: "汇总行程和餐厅信息发送到飞书",
         targetAgent: "officeAgent",
-        expectedTools: ["feishu_send_message"],
+        expectedTools: ["im_v1_message_create"],
         dependsOn: [1, 2],
         inputMapping: {
           itinerary: "step_1.output",
@@ -223,7 +223,7 @@ describe("Cross-Domain Collaboration", () => {
         id: 2,
         description: "发送行程到飞书",
         targetAgent: "officeAgent",
-        expectedTools: ["feishu_send_message"],
+        expectedTools: ["im_v1_message_create"],
         dependsOn: [1],
         inputMapping: {
           itineraryData: "step_1.output",

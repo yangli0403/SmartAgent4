@@ -30,7 +30,7 @@ export const PLAN_SYSTEM_PROMPT = `你是一个任务规划专家。根据用户
 - fileAgent: 文件搜索、文件信息查询、打开文件、目录操作、创建文件/文件夹、复制文件
 - navigationAgent: POI搜索、周边搜索、路径规划（驾车/步行/骑行/公交）、地理编码、天气查询、IP定位、导航、行程规划（工具：generate_itinerary）
 - multimediaAgent: 音乐搜索、音乐播放、歌单管理、每日推荐、登录状态管理
-- officeAgent: 飞书消息发送、日程创建、群组管理（工具：feishu_send_message, feishu_create_event, feishu_create_group）
+- officeAgent: 飞书消息发送、日程创建、群组管理、通讯录查询（工具：contact_v3_user_batchGetId, im_v1_message_create, im_v1_chat_create, calendar_v4_calendarEvent_create）
 - serviceAgent: 餐厅搜索、外卖下单、生活服务推荐（工具：search_restaurants, place_order）
 - generalAgent: 通用对话、知识问答、信息分析、结果汇总、新闻资讯查询（工具：get_latest_news, memory_store, memory_search）
 

@@ -16,7 +16,6 @@ import {
   callFileOrganizerTool,
   BUILTIN_FILE_ORGANIZER_SERVER_ID,
 } from "./fileOrganizerRuntime";
-import { callFeishuTool, FEISHU_TOOLS_SERVER_ID } from "../agent/tools/feishuTools";
 import { callNewsTool, NEWS_TOOLS_SERVER_ID } from "../agent/tools/newsTools";
 import { callServiceTool, SERVICE_TOOLS_SERVER_ID } from "../agent/tools/serviceTools";
 import { callItineraryTool, ITINERARY_TOOLS_SERVER_ID } from "../agent/tools/itineraryTools";
@@ -31,7 +30,6 @@ const BUILTIN_TOOL_HANDLERS: Record<
 > = {
   [MEMORY_TOOLS_SERVER_ID]: callMemoryTool,
   [BUILTIN_FILE_ORGANIZER_SERVER_ID]: callFileOrganizerTool,
-  [FEISHU_TOOLS_SERVER_ID]: callFeishuTool,
   [NEWS_TOOLS_SERVER_ID]: callNewsTool,
   [SERVICE_TOOLS_SERVER_ID]: callServiceTool,
   [ITINERARY_TOOLS_SERVER_ID]: callItineraryTool,

@@ -30,7 +30,6 @@ import { registerFreeWeatherTools } from "../mcp/freeWeatherTools";
 import { registerFileOrganizerTools } from "../mcp/fileOrganizerRegistration";
 import { registerMemoryTools } from "./tools/memoryTools";
 import { registerNewsTools } from "./tools/newsTools";
-import { registerFeishuTools } from "./tools/feishuTools";
 import { registerItineraryTools } from "./tools/itineraryTools";
 import { registerServiceTools } from "./tools/serviceTools";
 import {
@@ -133,9 +132,8 @@ export class SmartAgentApp {
     registerNewsTools(this.toolRegistry);
     console.log("[SmartAgentApp] News tools registered");
 
-    // 2.9 注册飞书办公协同工具（v0.5 Batch2 新增）
-    registerFeishuTools(this.toolRegistry);
-    console.log("[SmartAgentApp] Feishu office tools registered");
+    // 2.9 飞书办公协同工具由 mcp-config.json 中的 feishu MCP server 提供
+    console.log("[SmartAgentApp] Feishu office tools: provided by real MCP service");
 
     // 2.10 注册行程规划工具（v0.5 Batch2 新增）
     registerItineraryTools(this.toolRegistry);

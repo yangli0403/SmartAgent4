@@ -53,6 +53,26 @@
       "toolTimeout": 30000,
       "reconnectInterval": 5000,
       "maxReconnectAttempts": 3
+    },
+    {
+      "id": "feishu",
+      "name": "飞书协同",
+      "transport": "stdio",
+      "enabled": true,
+      "autoConnect": true,
+      "category": "office",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@larksuiteoapi/lark-mcp",
+        "mcp",
+        "-a", "${FEISHU_APP_ID}",
+        "-s", "${FEISHU_APP_SECRET}",
+        "-t", "preset.im.default,preset.calendar.default,contact.v3.user.batchGetId",
+        "-l", "zh"
+      ],
+      "connectTimeout": 30000,
+      "toolTimeout": 30000
     }
   ]
 }

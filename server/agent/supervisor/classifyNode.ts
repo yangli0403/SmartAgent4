@@ -6,6 +6,10 @@
  * V2 增强：
  * - System Prompt 从硬编码改为运行时通过 DynamicPromptAssembler 动态生成
  * - Agent 列表从 AgentCardRegistry 动态获取，支持热插拔
+ *
+ * V3 增强（follow-up 意图延续）：
+ * - 将最近对话摘要注入分类输入，让 LLM 能看到多轮上下文
+ * - 新增 refineClassificationForFollowUp 规则纠偏，防止补充信息被误判为 general
  */
 
 import type {
@@ -16,7 +20,7 @@ import type {
   PlanStep,
 } from "./state";
 import { callLLMStructured } from "../../llm/langchainAdapter";
-import { HumanMessage } from "@langchain/core/messages";
+import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import {
   getAgentCardRegistry,
   DynamicPromptAssembler,
@@ -40,6 +44,13 @@ export const CLASSIFY_SYSTEM_PROMPT = `你是一个任务分类专家。根据�
 - service: 餐厅搜索、外卖下单、生活服务推荐等（如「附近有什么好吃的」「帮我订外卖」「找川菜馆」）
 - general: 闲聊、知识问答、建议咨询、**仅同步住址/上班地等个人信息**（无导航意图）
 - cross_domain: 涉及多个领域的复合任务（如「帮我规划上海行程并发到飞书群」「找个餐厅然后帮我建个群约同事」）
+
+## 意图延续规则（多轮对话，必读）
+当提供了 [对话上下文] 时，你必须结合上下文判断用户意图：
+- 如果上一轮 Agent 向用户追问了某些信息（如邮箱、手机号、地址、时间、ID 等），而用户本轮消息是在**回答/补充**这些信息，则应**沿用上一轮的领域分类**，而不是判为 general。
+- 例：上一轮 officeAgent 问「请提供陈威的邮箱」，用户回复「chenwei@example.com」→ 应判为 **office**，不是 general。
+- 例：上一轮 navigationAgent 问「请问您的出发地是哪里」，用户回复「我在望京」→ 应判为 **navigation**，不是 general。
+- 判断依据：用户消息是否在回答上一轮 AI 的提问，而非发起全新话题。
 
 复杂度判断：
 - simple: 单步操作或简单问答，只需一个 Agent 即可完成
@@ -216,6 +227,180 @@ export function refineClassificationForDirectoryInventoryIntent(
   }
 }
 
+// ==================== V3 新增：Follow-up 意图延续 ====================
+
+/**
+ * 从对话历史中提取上一轮的任务域信息
+ *
+ * 扫描 messages 中倒数第二条 AI 消息之前的上下文，
+ * 推断上一轮任务所属的领域。
+ */
+function detectPreviousTurnDomain(
+  messages: readonly import("@langchain/core/messages").BaseMessage[]
+): string | null {
+  // 找到最近的 AI 消息（即上一轮 Agent 的回复）
+  const reversedMessages = [...messages].reverse();
+  const lastAIMessage = reversedMessages.find(
+    (m) => m instanceof AIMessage || m._getType() === "ai"
+  );
+
+  if (!lastAIMessage) return null;
+
+  const aiText =
+    typeof lastAIMessage.content === "string"
+      ? lastAIMessage.content
+      : JSON.stringify(lastAIMessage.content || "");
+
+  // 通过 AI 回复内容中的关键词推断上一轮域
+  // office 域特征：飞书、消息、日程、群、邮箱、open_id、发送
+  if (
+    /飞书|消息|日程|群组|建群|邮箱|手机号|open_id|user_id|发送消息|创建日程|创建群/.test(
+      aiText
+    )
+  ) {
+    return "office";
+  }
+  // navigation 域特征
+  if (/导航|路线|出发地|目的地|路径|规划|天气|地图|POI/.test(aiText)) {
+    return "navigation";
+  }
+  // multimedia 域特征
+  if (/歌曲|歌手|专辑|播放|音乐|歌单|歌词/.test(aiText)) {
+    return "multimedia";
+  }
+  // file_system 域特征
+  if (/文件|目录|磁盘|C盘|文件夹|清理/.test(aiText)) {
+    return "file_system";
+  }
+  // service 域特征
+  if (/餐厅|外卖|美食|推荐|附近/.test(aiText)) {
+    return "service";
+  }
+
+  return null;
+}
+
+/**
+ * 判断当前用户消息是否看起来像是在补充信息（回答上一轮追问）
+ *
+ * 泛化检测：包含邮箱、手机号、ID、地址、时间、人名+联系方式等模式
+ */
+function looksLikeSupplementaryInfo(userText: string): boolean {
+  const t = userText.trim();
+  if (!t) return false;
+
+  // 包含邮箱地址
+  if (/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(t)) return true;
+
+  // 包含手机号（中国大陆）
+  if (/1[3-9]\d{9}/.test(t)) return true;
+
+  // 包含各种 ID 格式（open_id, user_id, ou_ 开头等）
+  if (/(?:open_id|user_id|ou_|on_)[a-zA-Z0-9_]+/.test(t)) return true;
+
+  // 短消息 + 明显是在回答问题（"是xxx"、"xxx的邮箱/手机/账号是"）
+  if (t.length < 100 && /(?:邮箱|手机|账号|号码|电话|地址|ID|id)\s*(?:是|为|：|:)/.test(t)) return true;
+
+  // 非常短的消息（<30字），且不包含动词/请求词，很可能是补充回答
+  if (
+    t.length < 30 &&
+    !/(?:帮我|请|查|搜|找|发|建|创建|规划|导航|播放|推荐|分析|打开)/.test(t)
+  ) {
+    // 但要排除纯闲聊（你好、谢谢等）
+    if (!/^(?:你好|谢谢|好的|嗯|哦|再见|拜拜|ok|OK)/.test(t)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Follow-up 意图延续纠偏
+ *
+ * 当 LLM 将用户的补充信息误判为 general 时，
+ * 根据上一轮对话的任务域进行纠偏。
+ *
+ * 适用于所有域的 follow-up 场景，不仅限于 office。
+ */
+export function refineClassificationForFollowUp(
+  userText: string,
+  classification: TaskClassification,
+  messages: readonly import("@langchain/core/messages").BaseMessage[]
+): void {
+  // 仅在被判为 general 时触发纠偏
+  if (classification.domain !== "general") return;
+
+  // 检测上一轮的任务域
+  const prevDomain = detectPreviousTurnDomain(messages);
+  if (!prevDomain || prevDomain === "general") return;
+
+  // 检测当前消息是否像补充信息
+  if (!looksLikeSupplementaryInfo(userText)) return;
+
+  // 域名到 Agent 的映射
+  const domainAgentMap: Record<string, string> = {
+    office: "officeAgent",
+    navigation: "navigationAgent",
+    multimedia: "multimediaAgent",
+    file_system: "fileAgent",
+    service: "serviceAgent",
+  };
+
+  const targetAgent = domainAgentMap[prevDomain];
+  if (!targetAgent) return;
+
+  console.log(
+    `[ClassifyNode] Rule override: follow-up supplementary info detected. ` +
+      `general → ${prevDomain} (continuing previous turn intent)`
+  );
+
+  classification.domain = prevDomain;
+  classification.complexity = "simple";
+  classification.requiredAgents = [targetAgent];
+  classification.reasoning =
+    `[rule:follow_up_intent] 用户正在补充上一轮 ${prevDomain} 任务所需的信息。${classification.reasoning || ""}`.trim();
+}
+
+// ==================== 对话上下文摘要构建 ====================
+
+/**
+ * 从 messages 中构建最近对话摘要，用于注入分类输入
+ *
+ * 截取最近 N 条消息（不含当前用户消息），格式化为简洁的对话摘要。
+ * 这让 LLM 在分类时能看到多轮上下文，避免孤立判断。
+ */
+function buildRecentConversationSummary(
+  messages: readonly import("@langchain/core/messages").BaseMessage[],
+  maxTurns: number = 3
+): string {
+  if (messages.length <= 1) return "";
+
+  // 取除最后一条之外的最近消息（最后一条是当前用户消息）
+  const historyMessages = messages.slice(0, -1);
+  const recentMessages = historyMessages.slice(-maxTurns * 2);
+
+  if (recentMessages.length === 0) return "";
+
+  const lines: string[] = [];
+  for (const msg of recentMessages) {
+    const role =
+      msg instanceof HumanMessage || msg._getType() === "human"
+        ? "用户"
+        : "助手";
+    const content =
+      typeof msg.content === "string"
+        ? msg.content
+        : JSON.stringify(msg.content || "");
+    // 截断过长的消息
+    const truncated =
+      content.length > 120 ? content.slice(0, 120) + "..." : content;
+    lines.push(`${role}: ${truncated}`);
+  }
+
+  return lines.join("\n");
+}
+
 function getClassifyPrompt(): string {
   const registry = getAgentCardRegistry();
 
@@ -263,11 +448,18 @@ export async function classifyNode(
     contextInfo += `\n当前时间: ${state.context.currentTime}`;
   }
 
-  const fullMessage = contextInfo
-    ? `${userText}\n\n[上下文信息]${contextInfo}`
-    : userText;
+  // 3. V3 新增：构建最近对话摘要
+  const conversationSummary = buildRecentConversationSummary(messages);
 
-  // 3. 获取动态 Prompt 并调用 LLM
+  let fullMessage = userText;
+  if (conversationSummary) {
+    fullMessage = `${userText}\n\n[对话上下文]\n${conversationSummary}`;
+  }
+  if (contextInfo) {
+    fullMessage += `\n\n[上下文信息]${contextInfo}`;
+  }
+
+  // 4. 获取动态 Prompt 并调用 LLM
   const classifyPrompt = getClassifyPrompt();
 
   try {
@@ -279,7 +471,7 @@ export async function classifyNode(
 
     const registry = getAgentCardRegistry();
 
-    // 4. 验证分类结果（内置领域 + 已启用 Agent Card 的 domain）
+    // 5. 验证分类结果（内置领域 + 已启用 Agent Card 的 domain）
     const validDomains = collectValidClassificationDomains(registry);
     const validComplexities: TaskComplexity[] = [
       "simple",
@@ -297,6 +489,8 @@ export async function classifyNode(
     refineClassificationForMusicIntent(userText, classification);
     refineClassificationForDiskIntent(userText, classification);
     refineClassificationForDirectoryInventoryIntent(userText, classification);
+    // V3 新增：follow-up 意图延续纠偏
+    refineClassificationForFollowUp(userText, classification, messages);
 
     // 验证 requiredAgents：确保引用的 Agent 在注册表中存在
     if (
@@ -326,7 +520,7 @@ export async function classifyNode(
       `[ClassifyNode] Classification: domain=${classification.domain}, complexity=${classification.complexity}, agents=${classification.requiredAgents.join(",")}`
     );
 
-    // 5. 对于 simple 任务，生成默认的单步计划
+    // 6. 对于 simple 任务，生成默认的单步计划
     if (classification.complexity === "simple") {
       let defaultPlan: PlanStep[] = [
         {
@@ -369,6 +563,8 @@ export async function classifyNode(
     refineClassificationForMusicIntent(userText, fallback);
     refineClassificationForDiskIntent(userText, fallback);
     refineClassificationForDirectoryInventoryIntent(userText, fallback);
+    // V3 新增：降级时也应用 follow-up 纠偏
+    refineClassificationForFollowUp(userText, fallback, messages);
 
     if (!fallback.requiredAgents || fallback.requiredAgents.length === 0) {
       fallback.requiredAgents = resolveAgentsForDomain(

@@ -47,7 +47,6 @@ export default defineConfig({
         "server/agent/tools/newsTools.ts",
         "server/agent/tools/itineraryTools.ts",
         "server/agent/tools/serviceTools.ts",
-        "server/agent/tools/feishuTools.ts",
         "server/agent/domains/officeAgent.ts",
         "server/agent/domains/serviceAgent.ts",
         "server/routers/omniTokenRouter.ts",

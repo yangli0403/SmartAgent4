@@ -44,9 +44,9 @@ describe("New Domain Agents", () => {
 
     it("应有飞书相关的工具列表", () => {
       const tools = agent.availableTools;
-      expect(tools).toContain("feishu_send_message");
-      expect(tools).toContain("feishu_create_event");
-      expect(tools).toContain("feishu_create_group");
+      expect(tools).toContain("contact_v3_user_batchGetId");
+      expect(tools).toContain("im_v1_message_create");
+      expect(tools).toContain("calendar_v4_calendarEvent_create");
     });
 
     it("系统提示词应包含办公协同指引", () => {
