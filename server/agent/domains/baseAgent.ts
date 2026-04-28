@@ -40,6 +40,7 @@ import type {
   DelegateResult,
 } from "../discovery/types";
 import { formatDialogueSlotsForTask } from "../supervisor/dialogueSlots";
+import { generateToolParamGuide } from "../../mcp/schemaPromptGenerator";
 
 // ==================== 常量 ====================
 
@@ -323,10 +324,17 @@ export abstract class BaseAgent implements DomainAgentInterface {
       // 3. 构建 ReACT 图
       const graph = this.buildReactGraph(llmWithTools, tools);
 
-      // 4. 构建初始消息
-      const systemPrompt = this.getSystemPrompt(
+      // 4. 构建初始消息（自动注入工具参数指引）
+      const baseSystemPrompt = this.getSystemPrompt(
         input.context as Record<string, unknown> | undefined
       );
+
+      // 从 ToolRegistry 的 inputSchema 自动生成参数格式指引
+      const toolParamGuide = generateToolParamGuide(
+        this.mcpManager.getToolRegistry(),
+        this.availableTools
+      );
+      const systemPrompt = baseSystemPrompt + toolParamGuide;
 
       const taskMessage = this.buildTaskMessage(input);
 

@@ -95,7 +95,7 @@ export async function replanNode(
         case "replan":
           if (decision.updatedPlan && decision.updatedPlan.length > 0) {
             return {
-              plan: decision.updatedPlan,
+              plan: decision.updatedPlan.map((s: any, idx: number) => ({ ...s, id: s.id || `replan_step_${idx + 1}`, dependsOn: Array.isArray(s.dependsOn) ? s.dependsOn : [], expectedTools: s.expectedTools || [], inputMapping: s.inputMapping || {} })),
               currentStepIndex: 0,
             };
           }

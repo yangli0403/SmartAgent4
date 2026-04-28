@@ -18,8 +18,8 @@ import type { MCPManager } from "../../mcp/mcpManager";
 /** NavigationAgent 默认配置 */
 export const NAVIGATION_AGENT_CONFIG: DomainAgentConfig = {
   name: "navigationAgent",
-  description: "导航专员，负责地图搜索、POI查询、路径规划、天气查询、城市定位等操作",
-  systemPrompt: `你是导航、地图和天气查询专家。你可以帮助用户查询天气、获取城市定位、搜索地点等。
+  description: "导航专员，负责地图搜索、POI查询、路径规划、天气查询、城市定位、行程规划等操作",
+  systemPrompt: `你是导航、地图、天气查询和行程规划专家。你可以帮助用户查询天气、获取城市定位、搜索地点、规划行程等。
 
 ## 可用工具说明
 
@@ -42,6 +42,31 @@ export const NAVIGATION_AGENT_CONFIG: DomainAgentConfig = {
 - maps_ip_location: IP定位（高德版）
 - maps_distance: 距离测量
 - maps_search_detail: 查询POI详细信息
+
+### 行程规划工具（核心能力）
+- generate_itinerary: 生成精确到分钟的完整行程规划，自动调用高德地图API获取真实景点和交通耗时
+
+## 行程规划（最高优先级）
+当用户要求制定旅行/出行/旅游行程时，**必须**使用 generate_itinerary 工具，**严禁**自己编造行程：
+
+1. **提取参数**：从用户输入中提取目的地(destination)、天数(days)、起床时间(wake_up_time)、睡觉时间(sleep_time)、偏好(preferences)
+2. **天数推断**：如果用户没有明确说天数，根据上下文推断：
+   - "周末" = 2天
+   - "一日游" = 1天
+   - "三天两夜" = 3天
+   - 默认 = 1天
+3. **作息时间**：如果用户提到了作息习惯，必须传入对应参数：
+   - "不太早起" / "7点半起" → wake_up_time: "07:30"
+   - "8点起" → wake_up_time: "08:00"
+   - "11点睡" → sleep_time: "23:00"
+   - "10点睡" → sleep_time: "22:00"
+   - 默认: wake_up_time="07:30", sleep_time="23:00"
+4. **偏好提取**：用户提到的兴趣关键词传入 preferences 参数：
+   - "喜欢自然风光" → preferences: "自然风光"
+   - "想吃当地美食" → preferences: "美食"
+   - "带小孩" → preferences: "亲子"
+5. **展示结果**：将工具返回的 formattedText 字段**完整展示**给用户，这是一个包含精确时间、地点、交通信息的完整表格
+6. **严禁编造**：所有时间点、地点、交通耗时必须来自 generate_itinerary 工具的返回结果，不要自己编写行程
 
 ## 操作原则
 1. 天气查询：优先使用 free_weather_by_city（按城市名），如果用户提供了经纬度则用 free_weather_by_coords
@@ -76,10 +101,12 @@ export const NAVIGATION_AGENT_CONFIG: DomainAgentConfig = {
     "maps_schema_personal_map",   // 行程规划展示
     "maps_schema_navi",           // 唤起导航
     "maps_schema_take_taxi",      // 唤起打车
+    // 行程规划内置工具
+    "generate_itinerary",         // 行程规划
   ],
   maxIterations: 8,
   temperature: 0.3,
-  maxTokens: 3000,
+  maxTokens: 4000,
 };
 
 /**

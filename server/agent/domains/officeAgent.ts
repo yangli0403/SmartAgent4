@@ -34,36 +34,30 @@ export const OFFICE_AGENT_CONFIG: DomainAgentConfig = {
 当用户要求给某人发消息时，按以下步骤执行：
 
 **步骤1：获取收件人的 open_id**
-- 如果已有邮箱，调用 contact_v3_user_batchGetId 工具，参数：
-  - emails: ["对方邮箱"]
-  - user_id_type: "open_id"
-- 如果已有手机号，调用 contact_v3_user_batchGetId 工具，参数：
-  - mobiles: ["对方手机号"]
-  - user_id_type: "open_id"
+- 如果已有邮箱，调用 contact_v3_user_batchGetId 查询，将邮箱放入 emails 字段
+- 如果已有手机号，调用 contact_v3_user_batchGetId 查询，将手机号放入 mobiles 字段
 - 从返回结果中提取 user_id 字段，这就是 open_id
 
 **步骤2：使用 open_id 发送消息**
-- 调用 im_v1_message_create 工具，参数：
-  - receive_id_type: "open_id"
-  - receive_id: "步骤1获取的open_id"
-  - msg_type: "text"
-  - content: JSON.stringify({"text": "消息内容"})
+- 调用 im_v1_message_create，将步骤1获取的 open_id 作为 receive_id 发送消息
 
 **重要**：必须先完成步骤1拿到 open_id，才能执行步骤2。不要跳过任何步骤。
 如果用户只提供了姓名没有邮箱或手机号，先礼貌地询问。
 
 ## 创建日程的流程
 1. 如果需要邀请参与者，先通过 contact_v3_user_batchGetId 获取其 open_id
-2. 调用 calendar_v4_calendarEvent_create 创建日程
+2. 查询主日历 calendar_v4_calendar_primary，获取 calendar_id
+3. 调用 calendar_v4_calendarEvent_create 创建日程
 
 ## 创建群组的流程
 1. 先通过 contact_v3_user_batchGetId 获取所有成员的 open_id
 2. 调用 im_v1_chat_create 创建群组
 
 ## 操作原则
-1. 所有操作完成后给出明确的执行结果反馈
-2. 当接收到来自其他 Agent 的数据（如行程规划），应将其格式化为易读的消息内容
-3. 遇到错误时，向用户清晰说明原因并建议解决方案
+1. 所有工具的参数格式请严格参照下方“工具参数格式指引”，不要自行猜测或简化参数结构
+2. 所有操作完成后给出明确的执行结果反馈
+3. 当接收到来自其他 Agent 的数据（如行程规划），应将其格式化为易读的消息内容
+4. 遇到错误时，向用户清晰说明原因并建议解决方案
 
 ## 跨域协同指引
 - 当 resolvedInputs 中包含行程数据时，将其格式化为飞书消息发送

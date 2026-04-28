@@ -51,7 +51,7 @@ export function analyzeDependencies(
   }
 
   for (const step of steps) {
-    for (const dep of step.dependsOn) {
+    for (const dep of (step.dependsOn || [])) {
       if (stepIds.has(dep)) {
         inDegree.set(step.id, (inDegree.get(step.id) || 0) + 1);
         adjacency.get(dep)?.push(step.id);
