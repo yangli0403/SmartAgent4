@@ -246,7 +246,7 @@ export class EmotionsSystemClient {
     }
 
     const model = process.env.DASHSCOPE_TTS_MODEL || "cosyvoice-v3-flash";
-    const voice = process.env.DASHSCOPE_TTS_VOICE || "longanyang"; // 中文女声
+    const voice = process.env.TTS_VOICE || process.env.DASHSCOPE_TTS_VOICE || "longanling_v3"; // 女声：龙安灵（思维灵动女）
     const sampleRate = parseInt(process.env.DASHSCOPE_TTS_SAMPLE_RATE || "22050", 10);
     const format = process.env.DASHSCOPE_TTS_FORMAT || "wav";
     const timeout = this.config.timeout;

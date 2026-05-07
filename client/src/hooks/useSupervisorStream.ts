@@ -16,6 +16,10 @@ import type {
   SupervisorEventType,
 } from "@shared/supervisorEvents";
 import type { ChatThinkingDetail } from "@shared/chatTts";
+import {
+  playInterimAudio,
+  stopInterimAudio,
+} from "../lib/interimAudioPlayer";
 
 export type SupervisorStreamStatus =
   | "idle"
@@ -81,6 +85,16 @@ export function useSupervisorStream(
       try {
         const env = JSON.parse(ev.data) as SupervisorEventEnvelope;
         append(env);
+
+        // ✨ 过渡音频：收到 classified 事件时，立即播放对应分类域的女声过渡音频
+        if (env.type === "classified") {
+          const payload = (env as { payload?: { domain?: string; complexity?: string } }).payload;
+          const domain = payload?.domain || "general";
+          // 仅对非 simple 任务播放过渡音频（simple 任务响应很快，不需要过渡）
+          if (payload?.complexity !== "simple") {
+            playInterimAudio(domain).catch(() => {});
+          }
+        }
       } catch {
         // ignore malformed
       }
@@ -88,6 +102,9 @@ export function useSupervisorStream(
 
     const onFinal = (ev: MessageEvent) => {
       try {
+        // ✨ 主结果返回时，立即停止过渡音频
+        stopInterimAudio();
+
         const env = JSON.parse(ev.data) as SupervisorEventEnvelope;
         append(env);
         const payload = (env as { payload?: { response?: string } }).payload;

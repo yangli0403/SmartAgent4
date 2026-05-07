@@ -30,6 +30,14 @@ const ARK_BASE_URL =
 const ARK_DEFAULT_MODEL =
   process.env.ARK_DEFAULT_MODEL || "ep-20250811200411-zctsd";
 
+// ==================== 百炼平台轻量 LLM 配置（用于意图分类等轻量任务） ====================
+
+const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY ?? "";
+const DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+/** 轻量分类模型：默认使用 qwen-turbo（延迟低、成本低），可通过环境变量覆盖 */
+const DASHSCOPE_LIGHT_MODEL =
+  process.env.DASHSCOPE_LIGHT_MODEL || "qwen-turbo";
+
 // ==================== 统一配置选择 ====================
 
 /** 是否使用 OpenAI 兼容 API（本地配置的 OPENAI_API_KEY + OPENAI_BASE_URL） */
@@ -106,6 +114,77 @@ export function createToolCallingLLM(
     ...options,
   });
 }
+
+/**
+ * 创建百炼平台轻量 LLM 实例（用于意图分类、简单决策等低延迟任务）
+ *
+ * 直接调用百炼 DashScope 的 OpenAI 兼容接口，使用 qwen-turbo 等小模型。
+ * 脱离 Manus 环境后也可正常工作，只需 DASHSCOPE_API_KEY 即可。
+ *
+ * @param options - 配置选项
+ * @returns ChatOpenAI 实例
+ */
+export function createLightLLM(options: LLMAdapterOptions = {}): ChatOpenAI {
+  const apiKey = DASHSCOPE_API_KEY || ACTIVE_API_KEY;
+  const baseUrl = DASHSCOPE_API_KEY ? DASHSCOPE_BASE_URL : ACTIVE_BASE_URL;
+  const model = options.model || DASHSCOPE_LIGHT_MODEL;
+  return new ChatOpenAI({
+    model,
+    temperature: options.temperature ?? 0.2,
+    maxTokens: options.maxTokens ?? 1000,
+    configuration: {
+      baseURL: baseUrl,
+      apiKey,
+    },
+  });
+}
+
+/**
+ * 使用轻量 LLM 生成结构化 JSON 输出（用于意图分类等低延迟场景）
+ */
+export const callLightLLMStructured: <T>(
+  systemPrompt: string,
+  userMessage: string,
+  options?: LLMAdapterOptions
+) => Promise<T> = traceable(
+  async function callLightLLMStructured<T>(
+    systemPrompt: string,
+    userMessage: string,
+    options: LLMAdapterOptions = {}
+  ): Promise<T> {
+    const llm = createLightLLM({ temperature: 0.1, ...options });
+
+    const response = await llm.invoke([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ]);
+
+    const content =
+      typeof response.content === "string"
+        ? response.content
+        : JSON.stringify(response.content);
+
+    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) ||
+      content.match(/\{[\s\S]*\}/);
+
+    if (!jsonMatch) {
+      throw new Error(
+        `[LangChainAdapter] Light LLM failed to extract JSON: ${content.substring(0, 200)}`
+      );
+    }
+
+    const jsonStr = jsonMatch[1] || jsonMatch[0];
+
+    try {
+      return JSON.parse(jsonStr) as T;
+    } catch (e) {
+      throw new Error(
+        `[LangChainAdapter] Light LLM JSON parse failed: ${(e as Error).message}\nRaw: ${jsonStr.substring(0, 200)}`
+      );
+    }
+  },
+  { name: "callLightLLMStructured", run_type: "llm" }
+);
 
 // ==================== 结构化输出 ====================
 

@@ -1,0 +1,86 @@
+{
+  "navigation": {
+    "phrases": [
+      "好的，让我查查地图",
+      "正在为您规划路线",
+      "稍等，我看看怎么走"
+    ],
+    "files": [
+      "/audio/interim/navigation_1.wav",
+      "/audio/interim/navigation_2.wav",
+      "/audio/interim/navigation_3.wav"
+    ]
+  },
+  "multimedia": {
+    "phrases": [
+      "好的，帮您搜搜歌",
+      "让我找找看",
+      "稍等，正在搜索"
+    ],
+    "files": [
+      "/audio/interim/multimedia_1.wav",
+      "/audio/interim/multimedia_2.wav",
+      "/audio/interim/multimedia_3.wav"
+    ]
+  },
+  "file_system": {
+    "phrases": [
+      "好的，让我看看文件",
+      "正在分析磁盘信息",
+      "稍等，我查一下"
+    ],
+    "files": [
+      "/audio/interim/file_system_1.wav",
+      "/audio/interim/file_system_2.wav",
+      "/audio/interim/file_system_3.wav"
+    ]
+  },
+  "office": {
+    "phrases": [
+      "好的，我来处理",
+      "正在帮您操作飞书",
+      "稍等，马上就好"
+    ],
+    "files": [
+      "/audio/interim/office_1.wav",
+      "/audio/interim/office_2.wav",
+      "/audio/interim/office_3.wav"
+    ]
+  },
+  "service": {
+    "phrases": [
+      "好的，帮您找找",
+      "正在搜索附近的选择",
+      "稍等，让我看看"
+    ],
+    "files": [
+      "/audio/interim/service_1.wav",
+      "/audio/interim/service_2.wav",
+      "/audio/interim/service_3.wav"
+    ]
+  },
+  "general": {
+    "phrases": [
+      "好的，让我想想",
+      "稍等，我来回答",
+      "好的，我来帮您"
+    ],
+    "files": [
+      "/audio/interim/general_1.wav",
+      "/audio/interim/general_2.wav",
+      "/audio/interim/general_3.wav"
+    ]
+  },
+  "cross_domain": {
+    "phrases": [
+      "好的，这个需要多步操作",
+      "稍等，让我规划一下",
+      "好的，我来处理"
+    ],
+    "files": [
+      "/audio/interim/cross_domain_1.wav",
+      "/audio/interim/cross_domain_2.wav",
+      "/audio/interim/cross_domain_3.wav"
+    ]
+  }
+}

@@ -19,7 +19,7 @@ import type {
   TaskComplexity,
   PlanStep,
 } from "./state";
-import { callLLMStructured } from "../../llm/langchainAdapter";
+import { callLLMStructured, callLightLLMStructured } from "../../llm/langchainAdapter";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import {
   getAgentCardRegistry,
@@ -496,10 +496,11 @@ export async function classifyNode(
   const classifyPrompt = getClassifyPrompt();
 
   try {
-    const classification = await callLLMStructured<TaskClassification>(
+    // 优化：使用百炼平台轻量 LLM（qwen-turbo）进行意图分类，降低延迟
+    const classification = await callLightLLMStructured<TaskClassification>(
       classifyPrompt,
       fullMessage,
-      { temperature: 0.2 }
+      { temperature: 0.1 }
     );
 
     const registry = getAgentCardRegistry();

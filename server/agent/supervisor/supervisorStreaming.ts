@@ -329,11 +329,12 @@ export function publishEventsFromUpdates(
     published++;
   }
 
-  // 6. final（只在 reflection 完成后才发布，以保证结束于“反思入库”之后）
+  // 6. final（优化：不再等待 reflection 完成，一旦拿到 finalResponse 立即发布，
+  //    减少 1.5-3s 延迟。反思/记忆提取在后台异步完成，不阻塞用户感知。）
   if (
     update.finalResponse &&
     !ctx.finalPublished &&
-    (ctx.reflectedPublished || update.reflectionMeta)
+    ctx.respondingPublished
   ) {
     publishSupervisorEvent({
       requestId: ctx.requestId,
