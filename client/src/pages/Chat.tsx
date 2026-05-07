@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { getLoginUrl } from "@/const";
 import type { ChatUiMessage } from "@shared/chatTts";
 import { TtsPlayback } from "@/components/TtsPlayback";
+import { dispatchAssistantStageReply } from "@/lib/airi-stage";
 import { ThinkingBubble } from "@/components/cockpit/ThinkingBubble";
 import {
   Dialog,
@@ -76,6 +77,7 @@ export default function Chat() {
         ...prev,
         { role: "assistant", content: data.response },
       ]);
+      dispatchAssistantStageReply(data.response);
       utils.chat.listSessions.invalidate();
       if (data.persisted === false) {
         toast.warning(

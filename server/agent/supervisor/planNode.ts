@@ -17,6 +17,7 @@ import {
   DynamicPromptAssembler,
 } from "../discovery";
 import { appendGeneralAgentMemoryStepIfNeeded } from "./navigationMemoryPlan";
+import { appendNewsMemoryStepIfNeeded } from "./newsMemoryPlan";
 
 /**
  * planNode 的 LLM 系统提示词（静态降级版本）
@@ -177,6 +178,7 @@ export async function planNode(
     }
 
     plan.steps = appendGeneralAgentMemoryStepIfNeeded(state, plan.steps);
+    plan.steps = appendNewsMemoryStepIfNeeded(state, plan.steps);
 
     console.log(
       `[PlanNode] Plan generated: ${plan.steps.length} steps for goal "${plan.goal}"`

@@ -23,6 +23,7 @@ import type { MultimodalSegment } from "../emotions/types";
 import { loadAiriBridgeConfig } from "./config";
 import { EmotionMapper } from "./emotionMapper";
 import { AudioConverter } from "./audioConverter";
+import WebSocket from "ws";
 
 // ==================== WebSocket 事件类型（简化版 AIRI Plugin Protocol） ====================
 
@@ -155,7 +156,7 @@ export class AiriBridgeService {
           reject(new Error("Connection timeout (10s)"));
         }, 10000);
 
-        ws.onopen = () => {
+        ws.on("open", () => {
           clearTimeout(timeout);
           console.log("[AiriBridge] WebSocket connected");
           this.reconnectAttempts = 0;
@@ -188,21 +189,21 @@ export class AiriBridgeService {
           this.lastConnectedAt = new Date().toISOString();
           this.startHeartbeat();
           resolve();
-        };
+        });
 
-        ws.onmessage = (event: MessageEvent) => {
-          this.handleMessage(event);
-        };
+        ws.on("message", (rawData) => {
+          this.handleMessage(rawData.toString());
+        });
 
-        ws.onerror = (event: Event) => {
+        ws.on("error", () => {
           clearTimeout(timeout);
           const errorMsg = "WebSocket error";
           this.lastError = errorMsg;
           console.error(`[AiriBridge] ${errorMsg}`);
           reject(new Error(errorMsg));
-        };
+        });
 
-        ws.onclose = () => {
+        ws.on("close", () => {
           clearTimeout(timeout);
           this.stopHeartbeat();
 
@@ -211,7 +212,7 @@ export class AiriBridgeService {
           } else {
             this.setStatus("disconnected");
           }
-        };
+        });
       } catch (error) {
         this.lastError = (error as Error).message;
         this.setStatus("failed");
@@ -323,10 +324,9 @@ export class AiriBridgeService {
   /**
    * 处理收到的 WebSocket 消息
    */
-  private handleMessage(event: MessageEvent): void {
+  private handleMessage(message: string): void {
     try {
-      const data =
-        typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+      const data = JSON.parse(message);
 
       const eventType = data?.type;
       if (!eventType) return;

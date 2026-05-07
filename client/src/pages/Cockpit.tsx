@@ -20,15 +20,216 @@ import { toast } from "sonner";
 import { getLoginUrl } from "@/const";
 import { Send, Settings, Mic, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import AssistantPanel from "@/components/cockpit/AssistantPanel";
 import type { ChatUiMessage } from "@shared/chatTts";
 import MemoryCards from "@/components/cockpit/MemoryCards";
 import { RealtimeAsrSession } from "@/lib/realtimeAsrStream";
 import { AiriStageContainer } from "@/components/airi-stage/AiriStageContainer";
-import { dispatchStageEventsFromTags, notifyThinking, notifyIdle } from "@/lib/airi-stage/stageEventBus";
-import { parseEmotionTags } from "@/lib/emotionParser";
-import { useOmniMode } from "@/hooks/useOmniMode";
+import { dispatchAssistantStageReply, notifyThinking, notifyIdle } from "@/lib/airi-stage";
+import { useOmniMode, type UseOmniModeOptions } from "@/hooks/useOmniMode";
+
+// ==================== 文本噪声清理（Omni TTS 专用）====================
+
+/**
+ * 清理 Omni 回复文本中的噪声字符，防止被 TTS 错误播报。
+ * 过滤：Windows路径(~1)、URL、邮箱、Markdown表格头、特殊符号等。
+ */
+function cleanTextForTts(text: string): string {
+  return text
+    // 移除 Windows 临时路径 ~1、~2 等
+    .replace(/~[\d]+\b/g, "")
+    // 移除 URL
+    .replace(/https?:\/\/[^\s，、。！？;；]+/g, "")
+    // 移除邮箱
+    .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "")
+    // 移除 Markdown 表格头行 |---|---|
+    .replace(/^\|[-| :]+\|[\s\S]*?$/gm, "")
+    // 移除 Markdown 图片语法 ![alt](url)
+    .replace(/!\[.*?\]\(.*?\)/g, "")
+    // 移除 Markdown 链接语法 [text](url)
+    .replace(/\[([^\]]+)\]\(.*?\)/g, "$1")
+    // 移除 Markdown 代码块标记
+    .replace(/```[\s\S]*?```/g, "")
+    // 移除行内代码
+    .replace(/`[^`]+`/g, "")
+    // 移除 Markdown 标题符号（保留文字）
+    .replace(/^#{1,6}\s+/gm, "")
+    // 移除 Markdown 加粗/斜体标记
+    .replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, "$1")
+    // 移除连续的 | 分隔符行
+    .replace(/^\|[\s|*\-:]+\|$/gm, "")
+    // 移除多行连续空行
+    .replace(/\n{3,}/g, "\n\n")
+    // 移除行首行尾多余空白
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .join("\n")
+    .trim();
+}
+
+/**
+ * 从 LLM 回复中提取摘要并调用本地 TTS 合成播放。
+ * 优先使用本地 Piper TTS（local-voice-service），失败则尝试 Emotions-System。
+ * 摘要策略：取第一个完整句子（句号/问号/感叹号结尾），最多 150 字。
+ */
+/**
+ * 从 LLM 回复中智能提取 TTS 播报内容。
+ * 策略：短对话完整播报，行程/表格提取关键信息，天气数据提取数字+结论，其他取第一句。
+ */
+async function extractSummary(text: string): Promise<string> {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+
+  // 策略1：短对话完整播报
+  if (trimmed.length <= 80 && !/^#{1,3}\s/.test(trimmed) && !/\|.*\|/.test(trimmed)) {
+    return trimmed;
+  }
+
+  // 策略2：行程/表格类内容
+  if (/[#*]?\s*(第[一二两三四五六七1-7]天|日行程|景点|游览)/.test(trimmed) && /\|.*\|/.test(trimmed)) {
+    const dayMatch = trimmed.match(/(?:第 ?)?([一二两三四五六七1-7]) ?天/);
+    const destMatch = trimmed.match(/^#+\s*([^\n]{2,10})/);
+    const dest = destMatch ? destMatch[1].replace(/\s*\d.*$/, "").trim() : "";
+    const stopMatch = trimmed.match(/景点[：:]\s*(\d+)/);
+    const dayCount = dayMatch ? dayMatch[1].replace(/[1-7]/, (m: string) => ["一","二","三","四","五","六","日"][parseInt(m) - 1]) : "多";
+    const stopCount = stopMatch ? stopMatch[1] : String((trimmed.match(/🏛️/g) || []).length || "几");
+    const summary = dest
+      ? `${dest}${dayCount}日行程规划已完成，共${stopCount}个景点。`
+      : `${dayCount}日行程规划已完成，共${stopCount}个景点。`;
+    if (summary.length <= 200) return summary;
+  }
+
+  // 策略3：天气数据类
+  if (/天气|温度|湿度|风力/.test(trimmed) && /\d+°/.test(trimmed)) {
+    const cityMatch = trimmed.match(/([^\s，,]{2,6})(?:今天|今日|天气)/);
+    const tempMatch = trimmed.match(/(\d+)[-~]\d+°?C?/);
+    const condMatch = trimmed.match(/(晴|阴|多云|雨|雪|雷阵雨|小雨|雾|霾)/);
+    if (cityMatch && tempMatch) {
+      const summary = `${cityMatch[1]}今天${condMatch ? condMatch[0] + "，" : ""}${tempMatch[0]}。`;
+      if (summary.length <= 200) return summary;
+    }
+  }
+
+  // 策略4：新闻/资讯类
+  if (/最新消息|据.*报道|资讯|新闻/.test(trimmed)) {
+    const firstPara = trimmed.split(/\n\n/)[0].replace(/[#*`~]/g, "").trim();
+    const m = firstPara.match(/^[^。！？.?!]{5,200}[。？！.?!]/);
+    if (m) return m[0].trim();
+  }
+
+  // 策略5：默认取第一句（最多 200 字）
+  const m = trimmed.match(/^[^。！？.?!]{5,200}[。？！.?!]/);
+  return m ? m[0].trim() : trimmed.slice(0, 200);
+}
+
+let _localTtsCache: Map<string, string> = new Map();
+
+async function playLocalTtsSummary(fullResponse: string): Promise<void> {
+  if (!fullResponse.trim()) return;
+
+  const cleaned = cleanTextForTts(fullResponse);
+  const summary = await extractSummary(cleaned);
+  if (!summary) return;
+
+  // 缓存：相同摘要不重复合成
+  const cached = _localTtsCache.get(summary);
+  if (cached) {
+    console.log(`[LocalTTS] 使用缓存摘要: "${summary}"`);
+    const binary = atob(cached);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    // WAV 检测
+    const isWav = bytes.length >= 12 &&
+      bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes[8] === 0x57 && bytes[9] === 0x41 && bytes[10] === 0x56 && bytes[11] === 0x45;
+    const pcmBytes = isWav ? bytes.slice(44) : bytes;
+    try {
+      const ctx = new AudioContext({ sampleRate: 16000 });
+      await ctx.resume();
+      const int16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.byteLength / 2);
+      const f32 = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768;
+      const buf = ctx.createBuffer(1, f32.length, 16000);
+      buf.copyToChannel(f32, 0);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.start();
+      return;
+    } catch (e) {
+      console.warn("[LocalTTS] 缓存音频播放失败:", e);
+    }
+  }
+
+  // 尝试本地 TTS（local-voice-service Piper）
+  try {
+    const res = await fetch("http://127.0.0.1:8001/api/local-tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: summary }),
+    });
+    if (res.ok) {
+      const data = await res.json() as { audioBase64?: string };
+      if (data.audioBase64) {
+        _localTtsCache.set(summary, data.audioBase64);
+        console.log(`[LocalTTS] 本地 TTS 合成成功: "${summary}"`);
+        await playBase64Audio(data.audioBase64);
+        return;
+      }
+    }
+    console.warn("[LocalTTS] 本地 TTS 返回为空，尝试 Emotions-System");
+  } catch {
+    console.warn("[LocalTTS] 本地 TTS 服务不可用，尝试 Emotions-System");
+  }
+
+  // Fallback：调用 Emotions-System TTS
+  try {
+    const res = await fetch("/api/tts/synthesize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: summary }),
+    });
+    if (res.ok) {
+      const data = await res.json() as { audio_base64?: string; audioBase64?: string };
+      const b64 = data.audio_base64 || data.audioBase64 || "";
+      if (b64) {
+        _localTtsCache.set(summary, b64);
+        console.log(`[LocalTTS] Emotions TTS 合成成功: "${summary}"`);
+        await playBase64Audio(b64);
+      }
+    }
+  } catch (e) {
+    console.warn("[LocalTTS] Emotions TTS 也失败了:", e);
+  }
+}
+
+async function playBase64Audio(base64Data: string): Promise<void> {
+  try {
+    const binary = atob(base64Data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const isWav = bytes.length >= 12 &&
+      bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes[8] === 0x57 && bytes[9] === 0x41 && bytes[10] === 0x56 && bytes[11] === 0x45;
+    const pcmBytes = isWav ? bytes.slice(44) : bytes;
+    const ctx = new AudioContext({ sampleRate: 16000 });
+    await ctx.resume();
+    const int16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.byteLength / 2);
+    const f32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768;
+    const buf = ctx.createBuffer(1, f32.length, 16000);
+    buf.copyToChannel(f32, 0);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start();
+  } catch (e) {
+    console.warn("[LocalTTS] 播放失败:", e);
+  }
+}
 
 /** Ark LLM 代理地址（轻量级直连模式） */
 const ARK_PROXY_URL = import.meta.env.VITE_ARK_PROXY_URL || "";
@@ -70,18 +271,33 @@ export default function Cockpit() {
     );
   }, [activeRequestId, supervisorStream.details]);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [isMicActive, setIsMicActive] = useState(false);
   const asrSessionRef = useRef<RealtimeAsrSession | null>(null);
   const asrCommittedRef = useRef("");
 
-  // Omni 端到端语音模式
-  const { isOmniMode, toggleOmniMode, omniState, transcript, replyText } = useOmniMode();
-
-  // 人格切换状态
-  const [characterId, setCharacterId] = useState<string>("xiaozhi");
+  // ==================== Ark 直连模式状态 ====================
+  const [arkDirectMode, setArkDirectMode] = useState(Boolean(ARK_PROXY_URL));
+  const [arkSending, setArkSending] = useState(false);
 
   const utils = trpc.useUtils();
+
+  // ==================== Omni 音频播放状态 ====================
+  const [omniAiSpeaking, setOmniAiSpeaking] = useState(false);
+
+  // Omni 模式回调容器（使用 ref 避免 hooks 顺序问题）
+  const omniCallbacksRef = useRef<UseOmniModeOptions>({
+    onFinalTranscript: () => {},
+    onReplyText: () => {},
+    onAudioOutput: () => {},
+  });
+
+  // 人格切换状态（需在 useOmniMode 之前声明，因 Omni 回调中引用了 characterId）
+  const [characterId, setCharacterId] = useState<string>("xiaozhi");
+
+  // Omni 端到端语音模式（callback ref 在下面赋值）
+  const { isOmniMode, toggleOmniMode, omniState, transcript, replyText, error: omniError, audioManager } =
+    useOmniMode(undefined, omniCallbacksRef.current);
 
   // ==================== 后端 Mutations ====================
 
@@ -109,46 +325,42 @@ export default function Cockpit() {
     );
   };
 
-  // Ark 直连模式状态：如果配置了 VITE_ARK_PROXY_URL，直接进入直连模式
-  const [arkDirectMode, setArkDirectMode] = useState(Boolean(ARK_PROXY_URL));
-  const [arkSending, setArkSending] = useState(false);
-
   const sendMessageMutation = trpc.chat.sendMessage.useMutation({
     onSuccess: (data) => {
       setMessages((prev) => {
         const reqId = (data as { requestId?: string }).requestId;
-        // 将对应 requestId 的 thinking 消息标记为 completed
         const next = prev.map((m) =>
           m.role === "thinking" && reqId && m.requestId === reqId
-            ? { ...m, status: "completed" as const, headline: "Metris Agent 已完成思考", endedAt: Date.now() }
+            ? { ...m, status: "completed" as const, headline: "已完成思考", endedAt: Date.now() }
             : m
         );
         return [...next, { role: "assistant" as const, content: data.response }];
       });
       setActiveRequestId(undefined);
-      // 解析情感标签并分发到舞台事件总线
-      const parsed = parseEmotionTags(data.response);
-      if (parsed.tags.length > 0) {
-        dispatchStageEventsFromTags(parsed.tags);
-      }
+      dispatchAssistantStageReply(data.response);
       notifyIdle();
       utils.chat.listSessions.invalidate();
       void utils.memory.list.invalidate();
       if (data.persisted === false) {
         toast.warning("对话未保存到服务器，刷新后可能丢失。");
       }
+      // Omni 模式：对话完成后自动合成摘要 TTS 并播报
+      if (isOmniMode && audioManager) {
+        void synthesizeOmniSummary(data.response, audioManager);
+      } else if (!isOmniMode) {
+        // 非 Omni 模式（传统 ASR）：自动合成摘要 TTS 并播报
+        void playLocalTtsSummary(data.response);
+      }
     },
     onError: (error) => {
-      // 将 thinking 消息标记为 failed
       setMessages((prev) =>
         prev.map((m) =>
           m.role === "thinking" && m.status === "running"
-            ? { ...m, status: "error" as const, headline: "Metris Agent 思考失败", endedAt: Date.now() }
+            ? { ...m, status: "error" as const, headline: "思考失败", endedAt: Date.now() }
             : m
         )
       );
       setActiveRequestId(undefined);
-      // tRPC 后端不可用时自动切换到 Ark 直连模式
       console.warn("[Cockpit] tRPC 失败，切换到 Ark 直连模式:", error.message);
       setArkDirectMode(true);
       toast.info("已切换到 Ark LLM 直连模式");
@@ -162,21 +374,212 @@ export default function Cockpit() {
     notifyThinking();
     try {
       const data = await callArkProxy(userMessage, String(currentSessionId ?? "default"));
+      const cleaned = cleanTextForTts(data.response);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: data.response },
+        { role: "assistant", content: cleaned },
       ]);
-      // 解析情感标签并分发到舞台事件总线
-      const parsed = parseEmotionTags(data.response);
-      if (parsed.tags.length > 0) {
-        dispatchStageEventsFromTags(parsed.tags);
-      }
+      dispatchAssistantStageReply(cleaned);
       notifyIdle();
+      if (isOmniMode && audioManager) {
+        void synthesizeOmniSummary(cleaned, audioManager);
+      } else {
+        void playLocalTtsSummary(cleaned);
+      }
     } catch (err: any) {
       toast.error("Ark LLM 调用失败: " + err.message);
       notifyIdle();
     } finally {
       setArkSending(false);
+    }
+  };
+
+  /**
+   * Omni 模式：调用后端提取摘要并合成 TTS，然后播放
+   */
+  const synthesizeOmniSummary = async (
+    fullResponse: string,
+    audioMgr: NonNullable<ReturnType<typeof useOmniMode>["audioManager"]>
+  ) => {
+    if (!fullResponse.trim()) return;
+    try {
+      // 先清理噪声字符再合成
+      const cleaned = cleanTextForTts(fullResponse);
+      const result = await trpc.chat.synthesizeOmniSummary.mutate({
+        fullResponse: cleaned,
+        sessionId: currentSessionId ?? undefined,
+      });
+      if (result.tts?.segments?.[0]?.audioBase64) {
+        const base64 = result.tts.segments[0].audioBase64;
+        console.log(`[Cockpit] Omni TTS 摘要: "${result.summary}" → 播放音频`);
+        await audioMgr.playBase64Audio(base64);
+      } else {
+        console.warn("[Cockpit] Omni TTS 返回为空，跳过播放");
+      }
+    } catch (err) {
+      console.error("[Cockpit] Omni TTS 合成失败:", err);
+    }
+  };
+
+  // 填充 Omni 回调（在所有依赖定义完成后）
+  omniCallbacksRef.current = {
+    onFinalTranscript: async (text) => {
+      if (!text.trim()) return;
+      const userMessage = text.trim();
+      console.log(`[Cockpit] Omni final transcript: "${userMessage}"`);
+      setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
+      setMessage("");
+      notifyThinking();
+      if (arkDirectMode) {
+        await sendViaArkProxy(userMessage);
+      } else {
+        const requestId =
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        setActiveRequestId(requestId);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "thinking" as const,
+            content: "",
+            requestId,
+            status: "running" as const,
+            headline: "Omni 思考中...",
+            details: [],
+            startedAt: Date.now(),
+          },
+        ]);
+        sendMessageMutation.mutate({
+          message: userMessage,
+          sessionId: currentSessionId ?? undefined,
+          characterId,
+          requestId,
+        });
+      }
+    },
+    onReplyText: (text, isFinal) => {
+      if (isFinal) {
+        setOmniAiSpeaking(false);
+        console.log(`[Cockpit] Omni LLM 回复完成: "${text.slice(0, 100)}..."`);
+      }
+    },
+    onAudioOutput: () => {
+      setOmniAiSpeaking(true);
+    },
+  };
+
+  // AI 正在说话状态（检测 replyText 变化）
+  const [aiSpeaking, setAiSpeaking] = useState(false);
+  const replyTextRef = useRef("");
+  const aiSpeakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 检测 AI 回复文本变化，表示 AI 正在生成/播放语音
+  useEffect(() => {
+    if (replyText && replyText !== replyTextRef.current) {
+      replyTextRef.current = replyText;
+      setAiSpeaking(true);
+
+      // 停止说话后 2 秒重置状态
+      if (aiSpeakingTimerRef.current) {
+        clearTimeout(aiSpeakingTimerRef.current);
+      }
+      aiSpeakingTimerRef.current = setTimeout(() => {
+        setAiSpeaking(false);
+      }, 2000);
+    }
+    return () => {
+      if (aiSpeakingTimerRef.current) {
+        clearTimeout(aiSpeakingTimerRef.current);
+      }
+    };
+  }, [replyText]);
+
+  // 语音模式（独立控制：ASR 识别 和 TTS 合成）
+  const [asrMode, setAsrModeState] = useState<"cloud" | "local">("cloud");
+  const [ttsMode, setTtsModeState] = useState<"cloud" | "local">(
+    (window as any).__ENV__?.VITE_DEFAULT_TTS === "local" ? "local" : "cloud"
+  );
+  const [syncingVoiceMode, setSyncingVoiceMode] = useState(false);
+
+  // 初始化语音模式状态（从后端同步 ttsMode，前端控制 asrMode）
+  useEffect(() => {
+    void fetch("/api/voice-mode")
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (data?.ttsMode === "cloud" || data?.ttsMode === "local") {
+          setTtsModeState(data.ttsMode);
+        }
+        // 从后端同步 ASR 模式
+        if (data?.mode === "cloud" || data?.mode === "local") {
+          setAsrModeState(data.mode);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  /** 更新 TTS 模式（写入后端 + 前端状态） */
+  const updateTtsMode = async (next: "cloud" | "local") => {
+    setSyncingVoiceMode(true);
+    try {
+      if (next === "local") {
+        try {
+          const healthRes = await fetch("http://127.0.0.1:8001/health", {
+            method: "GET",
+            signal: AbortSignal.timeout(3000),
+          });
+          if (!healthRes.ok) throw new Error("Service unavailable");
+        } catch {
+          alert("本地语音服务未启动，请先运行：\n\ncd D:\\DEMO\\SmartAgent4_demo\\local-voice-service\npython main.py");
+          setSyncingVoiceMode(false);
+          return;
+        }
+      }
+      const res = await fetch("/api/voice-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ttsMode: next }),
+      });
+      if (!res.ok) throw new Error("voice mode update failed");
+      setTtsModeState(next);
+    } catch {
+      // ignore
+    } finally {
+      setSyncingVoiceMode(false);
+    }
+  };
+
+  /** ASR 模式切换（前端独立管理） */
+  const updateAsrMode = async (next: "cloud" | "local") => {
+    setSyncingVoiceMode(true);
+    try {
+      if (next === "local") {
+        // 切换到本地前，先检查本地语音服务是否在运行
+        try {
+          const healthRes = await fetch("http://127.0.0.1:8001/health", {
+            method: "GET",
+            signal: AbortSignal.timeout(3000),
+          });
+          if (!healthRes.ok) throw new Error("Service unavailable");
+        } catch {
+          alert(
+            "本地语音服务未启动，请先运行：\n\ncd D:\\DEMO\\SmartAgent4_demo\\local-voice-service\npython main.py\n\n或者双击运行 start-local-voice.bat"
+          );
+          setSyncingVoiceMode(false);
+          return;
+        }
+      }
+      const res = await fetch("/api/voice-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asrMode: next }),
+      });
+      if (!res.ok) throw new Error("voice mode update failed");
+      setAsrModeState(next);
+    } catch {
+      // keep old mode on failure
+    } finally {
+      setSyncingVoiceMode(false);
     }
   };
 
@@ -241,24 +644,22 @@ export default function Cockpit() {
 
   // ==================== 事件处理 ====================
 
-  const handleSend = () => {
+  /** 纯发送函数：传入已知文本，不依赖 React state，避免 setState 异步时序问题 */
+  const doSend = (userMessage: string) => {
+    if (!userMessage.trim()) return;
     const isPending = arkDirectMode ? arkSending : sendMessageMutation.isPending;
-    if (!message.trim() || isPending) return;
-    const userMessage = message.trim();
+    if (isPending) return;
     setMessage("");
     setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
 
     if (arkDirectMode) {
-      // Ark 直连模式
       sendViaArkProxy(userMessage);
     } else {
-      // 通知舞台进入 thinking 状态
       notifyThinking();
-      // v0.5：生成 requestId，插入一条 thinking 占位消息，同时启动 SSE 订阅
       const requestId =
-        (typeof crypto !== "undefined" && "randomUUID" in crypto
+        typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
-          : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+          : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       setActiveRequestId(requestId);
       setMessages((prev) => [
         ...prev,
@@ -281,11 +682,22 @@ export default function Cockpit() {
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleSend = () => {
+    doSend(message.trim());
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  // 自动调整输入框高度
+  const adjustTextareaHeight = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const textarea = e.target;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 150)}px`; // 最大高度 150px
   };
 
   const handleNewSession = () => {
@@ -295,11 +707,18 @@ export default function Cockpit() {
 
   const toggleMic = async () => {
     if (isMicActive) {
+      // ASR 结束后，收集最终文本并自动发送
+      const finalText = (asrCommittedRef.current + message).trim();
       try {
         await asrSessionRef.current?.stop();
       } finally {
         asrSessionRef.current = null;
         setIsMicActive(false);
+        asrCommittedRef.current = "";
+      }
+      // ASR 结束 → 直接调用 doSend，不依赖 React state 异步更新
+      if (finalText) {
+        doSend(finalText);
       }
       return;
     }
@@ -445,8 +864,41 @@ export default function Cockpit() {
           </button>
         </div>
 
+        {/* TTS 合成模式切换 */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-white/60">TTS</span>
+          <Switch
+            checked={ttsMode === "local"}
+            disabled={syncingVoiceMode}
+            onCheckedChange={checked =>
+              void updateTtsMode(checked ? "local" : "cloud")
+            }
+            className="scale-90"
+          />
+          <span className="text-xs text-white/60">
+            {ttsMode === "local" ? "离线" : "在线"}
+          </span>
+        </div>
+
+        {/* ASR 识别模式切换 */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-white/60">ASR</span>
+          <Switch
+            checked={asrMode === "local"}
+            disabled={syncingVoiceMode}
+            onCheckedChange={checked =>
+              void updateAsrMode(checked ? "local" : "cloud")
+            }
+            className="scale-90"
+            title="ASR 离线模式（Whisper）切换"
+          />
+          <span className="text-xs text-white/60">
+            {asrMode === "local" ? "离线" : "在线"}
+          </span>
+        </div>
+
         {/* Omni 端到端语音模式 */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => void toggleOmniMode()}
             className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-medium transition-all ${
@@ -462,12 +914,37 @@ export default function Cockpit() {
             </svg>
             <span>
               {isOmniMode
-                ? omniState === "connected" ? "Omni 对话中" : "Omni 连接中..."
+                ? omniState === "connected"
+                  ? "Omni 录音中..."
+                  : omniState === "connecting"
+                    ? "连接中..."
+                    : "Omni 连接失败"
                 : "Omni 模式"}
             </span>
           </button>
-          {isOmniMode && omniState === "connected" && (
+
+          {/* AI 播放动画（Omni 模式用 omniAiSpeaking，文本模式用 aiSpeaking） */}
+          {isOmniMode && (omniAiSpeaking || aiSpeaking) && (
+            <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-purple-500/30 border border-purple-400/40">
+              <div className="flex items-end gap-0.5 h-3">
+                <div className="w-0.5 bg-purple-400 rounded-full animate-[bar_0.6s_ease-in-out_infinite]" style={{ height: "40%" }} />
+                <div className="w-0.5 bg-purple-400 rounded-full animate-[bar_0.6s_ease-in-out_0.1s_infinite]" style={{ height: "80%" }} />
+                <div className="w-0.5 bg-purple-400 rounded-full animate-[bar_0.6s_ease-in-out_0.2s_infinite]" style={{ height: "100%" }} />
+                <div className="w-0.5 bg-purple-400 rounded-full animate-[bar_0.6s_ease-in-out_0.3s_infinite]" style={{ height: "60%" }} />
+                <div className="w-0.5 bg-purple-400 rounded-full animate-[bar_0.6s_ease-in-out_0.4s_infinite]" style={{ height: "90%" }} />
+              </div>
+              <span className="text-[10px] text-purple-300">AI 播放中</span>
+            </div>
+          )}
+
+          {isOmniMode && omniState === "connected" && !aiSpeaking && (
             <span className="text-[10px] text-green-400 animate-pulse">● 已连接</span>
+          )}
+          {isOmniMode && omniState === "connecting" && (
+            <span className="text-[10px] text-yellow-400 animate-pulse">● 正在连接...</span>
+          )}
+          {isOmniMode && omniState === "error" && (
+            <span className="text-[10px] text-red-400">● {omniError || "连接失败"}</span>
           )}
         </div>
 
@@ -480,15 +957,20 @@ export default function Cockpit() {
         )}
 
         {/* 输入框 */}
-        <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15 px-3 py-1.5">
-          <Input
+        <div className="flex items-end gap-2 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15 px-3 py-2">
+          <Textarea
             ref={inputRef}
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onChange={(e) => {
+              setMessage(e.target.value);
+              adjustTextareaHeight(e);
+            }}
+            onKeyDown={handleKeyPress}
             placeholder="输入消息..."
             disabled={sendMessageMutation.isPending}
-            className="flex-1 border-0 bg-transparent shadow-none focus-visible:ring-0 text-sm h-8 px-1 text-white placeholder:text-white/40"
+            rows={1}
+            className="flex-1 border-0 bg-transparent shadow-none focus-visible:ring-0 text-sm px-1 text-white placeholder:text-white/40 resize-none min-h-[32px] max-h-[150px] overflow-y-auto"
+            style={{ height: "auto" }}
           />
           <Button
             onClick={handleSend}

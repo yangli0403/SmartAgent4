@@ -140,3 +140,49 @@ export function notifyTtsLevel(level: number): void {
     level: Math.max(0, Math.min(1, level)),
   });
 }
+
+/** 模拟朗读口型：定时发送音量电平，用于无 TTS 波形时的短期兜底 */
+let simulatedLipsyncInterval: ReturnType<typeof setInterval> | null = null;
+let simulatedLipsyncEndTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * 取消正在进行的模拟口型（新一条助手消息到达时应先调用）
+ */
+export function cancelSimulatedSpeechLipsync(): void {
+  if (simulatedLipsyncInterval) {
+    clearInterval(simulatedLipsyncInterval);
+    simulatedLipsyncInterval = null;
+  }
+  if (simulatedLipsyncEndTimer) {
+    clearTimeout(simulatedLipsyncEndTimer);
+    simulatedLipsyncEndTimer = null;
+  }
+  stageEventBus.emit("tts_stop", { type: "tts_stop" });
+}
+
+/**
+ * 按文本长度估算“说话”时长，用正弦波模拟嘴部开合电平
+ */
+export function startSimulatedSpeechLipsync(cleanTextLength: number): void {
+  cancelSimulatedSpeechLipsync();
+  const durationMs = Math.min(
+    12000,
+    Math.max(800, Math.round(cleanTextLength * 45))
+  );
+  notifyTtsStart(durationMs);
+  const startedAt = Date.now();
+  simulatedLipsyncInterval = setInterval(() => {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed >= durationMs) return;
+    const wave = 0.32 + Math.sin(elapsed / 110) * 0.22;
+    notifyTtsLevel(wave);
+  }, 80);
+  simulatedLipsyncEndTimer = setTimeout(() => {
+    if (simulatedLipsyncInterval) {
+      clearInterval(simulatedLipsyncInterval);
+      simulatedLipsyncInterval = null;
+    }
+    simulatedLipsyncEndTimer = null;
+    notifyTtsStop();
+  }, durationMs);
+}

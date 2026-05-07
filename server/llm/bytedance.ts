@@ -36,7 +36,7 @@ const OPENAI_URL =
   ""; // Windows-compat: 不再默认指向 Manus 内部网关
 
 // Volcengine ARK 回退配置
-const ARK_API_KEY = process.env.ARK_API_KEY || "7c4d52bf-e540-4337-a9ab-1a5228acedaa";
+const ARK_API_KEY = process.env.ARK_API_KEY || "";
 const ARK_BASE_URL = process.env.ARK_API_URL || "https://ark.cn-beijing.volces.com/api/v3";
 const ARK_DEFAULT_MODEL = process.env.ARK_DEFAULT_MODEL || "ep-20250811200411-zctsd";
 
@@ -47,6 +47,12 @@ const ACTIVE_BASE_URL = USE_OPENAI ? OPENAI_URL : ARK_BASE_URL;
 const DEFAULT_MODEL = USE_OPENAI
   ? (process.env.OPENAI_DEFAULT_MODEL || "gpt-4.1-mini")
   : ARK_DEFAULT_MODEL;
+
+if (!USE_OPENAI && !ARK_API_KEY) {
+  throw new Error(
+    "[bytedance] ARK_API_KEY is required when OPENAI_API_KEY is not configured."
+  );
+}
 
 /**
  * Call LLM (Manus built-in or Volcengine ARK fallback)

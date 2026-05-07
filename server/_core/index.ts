@@ -15,6 +15,7 @@ import { startNeteaseMCPServer, NETEASE_MCP_PORT } from "../mcp/netease/index";
 import { attachAsrWebSocket } from "../asr/asrStreamSocket";
 import { createSupervisorSseRouter } from "../agent/supervisor/supervisorSseRouter";
 import { createOmniTokenRouter } from "../routers/omniTokenRouter";
+import { getVoiceMode, getTtsMode, setVoiceMode, setTtsMode } from "../voice/voiceMode";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -62,6 +63,34 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.get("/api/voice-mode", (_req, res) => {
+    res.json({ mode: getVoiceMode(), ttsMode: getTtsMode() });
+  });
+  app.post("/api/voice-mode", (req, res) => {
+    // 支持三种格式：
+    // 1. { asrMode, ttsMode }  — 两个独立字段（新版）
+    // 2. { ttsMode }           — 单独更新 TTS
+    // 3. { mode }              — 旧版单一开关，同步更新 ASR+TTS
+    const { mode, ttsMode, asrMode } = req.body ?? {};
+
+    if (typeof asrMode === "string" && (asrMode === "cloud" || asrMode === "local")) {
+      setVoiceMode(asrMode);
+    }
+    if (typeof ttsMode === "string" && (ttsMode === "cloud" || ttsMode === "local")) {
+      setTtsMode(ttsMode);
+    }
+    if (typeof asrMode !== "string" && typeof ttsMode !== "string") {
+      // 旧格式：单一 mode 同时影响 ASR 和 TTS
+      if (mode !== "cloud" && mode !== "local") {
+        return res
+          .status(400)
+          .json({ error: "Invalid mode. Expected 'cloud' or 'local'." });
+      }
+      setVoiceMode(mode);
+      setTtsMode(mode);
+    }
+    return res.json({ mode: getVoiceMode(), ttsMode: getTtsMode() });
+  });
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
   // 新API路由：序列思考、增强聊天（记忆相关功能已统一到 tRPC memory 路由）
@@ -71,6 +100,44 @@ async function startServer() {
   app.use(createSupervisorSseRouter());
   // v0.5 Batch2: Omni 端到端语音模式 Token 端点
   app.use(createOmniTokenRouter());
+  // ==================== TTS 合成端点（供前端直接调用）====================
+  // 优先 Emotions-System，fallback 本地 Piper
+  app.post("/api/tts/synthesize", async (req, res) => {
+    const { text } = req.body as { text?: string };
+    if (!text?.trim()) {
+      res.status(400).json({ error: "text is required" });
+      return;
+    }
+    try {
+      const { getEmotionsClient } = await import("../emotions/emotionsClient");
+      const { synthesizeReplyTts } = await import("../emotions/chatTtsHelper");
+      const client = getEmotionsClient();
+      const available = await client.isAvailable();
+      if (available) {
+        const { payload } = await synthesizeReplyTts(text.trim(), "frontend-tts");
+        const seg = payload.segments?.[0];
+        if (seg?.audioBase64) {
+          res.json({ audio_base64: seg.audioBase64, format: seg.audioFormat || "wav" });
+          return;
+        }
+      }
+      // Fallback: 尝试本地 Piper
+      const localRes = await fetch("http://127.0.0.1:8001/api/local-tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.trim() }),
+      });
+      if (localRes.ok) {
+        const data = await localRes.json() as { audioBase64?: string };
+        res.json({ audio_base64: data.audioBase64 || "", format: "wav" });
+        return;
+      }
+      res.status(503).json({ error: "TTS service unavailable" });
+    } catch (err) {
+      console.error("[TTS] /api/tts/synthesize error:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
   // tRPC API
   app.use(
     "/api/trpc",

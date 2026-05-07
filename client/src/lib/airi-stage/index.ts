@@ -42,7 +42,13 @@ export {
   notifyTtsStart,
   notifyTtsStop,
   notifyTtsLevel,
+  startSimulatedSpeechLipsync,
+  cancelSimulatedSpeechLipsync,
 } from "./stageEventBus";
+
+export { dispatchAssistantStageReply } from "./assistantStageDispatch";
+export { inferStageHeuristic } from "./inferStageHeuristic";
+export type { StageHeuristicResult } from "./inferStageHeuristic";
 
 // 映射配置
 export { EXPRESSION_MAPPING, getExpressionParams } from "./expressionMapping";

@@ -55,11 +55,14 @@ async function getWeatherByCity(city: string): Promise<string> {
   try {
     // 1. 城市名转经纬度
     const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=zh&format=json`;
+    console.log(`[Weather] Geocoding "${city}" via: ${geoUrl}`);
     const geoResp = await fetch(geoUrl, { signal: AbortSignal.timeout(8000) });
     if (!geoResp.ok) throw new Error(`Geocoding failed: ${geoResp.status}`);
     const geoData = await geoResp.json() as { results?: Array<{ name: string; latitude: number; longitude: number; country: string; admin1?: string }> };
+    console.log(`[Weather] Geocoding result for "${city}":`, JSON.stringify(geoData.results));
 
     if (!geoData.results || geoData.results.length === 0) {
+      console.warn(`[Weather] City not found: ${city}`);
       return `未找到城市"${city}"的地理信息，请检查城市名称是否正确。`;
     }
 
@@ -68,11 +71,14 @@ async function getWeatherByCity(city: string): Promise<string> {
     const locationName = admin1 ? `${country} ${admin1} ${name}` : `${country} ${name}`;
 
     // 2. 查询天气
+    console.log(`[Weather] Fetching weather for ${city} (lat=${latitude}, lon=${longitude})`);
     return await getWeatherByCoords(latitude, longitude, locationName);
   } catch (e) {
-    // 降级到 wttr.in
+    // 降级到 wttr.in（仅在 open-meteo 完全失败时使用）
+    console.warn(`[Weather] open-meteo failed: ${(e as Error).message}, trying wttr.in fallback...`);
     try {
       const wttrUrl = `https://wttr.in/${encodeURIComponent(city)}?format=j1&lang=zh`;
+      console.log(`[Weather] Fallback to wttr.in: ${wttrUrl}`);
       const wttrResp = await fetch(wttrUrl, { signal: AbortSignal.timeout(8000) });
       if (!wttrResp.ok) throw new Error(`wttr.in failed: ${wttrResp.status}`);
       const data = await wttrResp.json() as {
@@ -131,6 +137,7 @@ async function getWeatherByCoords(
 ): Promise<string> {
   try {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto&forecast_days=3`;
+    console.log(`[Weather] Fetching forecast from open-meteo: ${url}`);
     const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!resp.ok) throw new Error(`open-meteo failed: ${resp.status}`);
 
@@ -153,6 +160,7 @@ async function getWeatherByCoords(
       };
       timezone: string;
     };
+    console.log(`[Weather] Forecast data:`, JSON.stringify(data.current));
 
     const cur = data.current;
     const loc = locationName || `${latitude.toFixed(2)}, ${longitude.toFixed(2)}`;

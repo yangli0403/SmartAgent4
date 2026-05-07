@@ -26,6 +26,7 @@ import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Button } from "./ui/button";
+import { Switch } from "./ui/switch";
 
 const menuItems = [
   { icon: LayoutDashboard, label: "Page 1", path: "/" },
@@ -33,6 +34,9 @@ const menuItems = [
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
+const VOICE_MODE_KEY = "voice-mode";
+const ASR_MODE_KEY = "asr-mode";
+const TTS_MODE_KEY = "tts-mode";
 const DEFAULT_WIDTH = 280;
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 480;
@@ -116,6 +120,73 @@ function DashboardLayoutContent({
   const sidebarRef = useRef<HTMLDivElement>(null);
   const activeMenuItem = menuItems.find(item => item.path === location);
   const isMobile = useIsMobile();
+  const [asrMode, setAsrModeState] = useState<"cloud" | "local">("cloud");
+  const [ttsMode, setTtsModeState] = useState<"cloud" | "local">("cloud");
+  const [syncingVoiceMode, setSyncingVoiceMode] = useState(false);
+
+  useEffect(() => {
+    // 尝试从 localStorage 恢复（仅作为快速 UI 初始化）
+    const savedAsr = localStorage.getItem(ASR_MODE_KEY);
+    const savedTts = localStorage.getItem(TTS_MODE_KEY);
+    if (savedAsr === "cloud" || savedAsr === "local") setAsrModeState(savedAsr);
+    if (savedTts === "cloud" || savedTts === "local") setTtsModeState(savedTts);
+
+    // 从后端同步最新值（优先）
+    void fetch("/api/voice-mode")
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (data?.mode === "cloud" || data?.mode === "local") {
+          setAsrModeState(data.mode);
+          localStorage.setItem(ASR_MODE_KEY, data.mode);
+        }
+        if (data?.ttsMode === "cloud" || data?.ttsMode === "local") {
+          setTtsModeState(data.ttsMode);
+          localStorage.setItem(TTS_MODE_KEY, data.ttsMode);
+        }
+      })
+      .catch(() => {
+        // ignore mode bootstrap failures in UI
+      });
+  }, []);
+
+  const updateVoiceMode = async (next: "cloud" | "local") => {
+    setSyncingVoiceMode(true);
+    try {
+      if (next === "local") {
+        // 切换到本地前，先检查本地语音服务是否在运行
+        try {
+          const healthRes = await fetch("http://127.0.0.1:8001/health", {
+            method: "GET",
+            signal: AbortSignal.timeout(3000),
+          });
+          if (!healthRes.ok) {
+            throw new Error("Service unavailable");
+          }
+        } catch {
+          alert(
+            "本地语音服务未启动，请先运行：\n\ncd D:\\DEMO\\SmartAgent4_demo\\local-voice-service\npython main.py\n\n或者双击运行 start-local-voice.bat"
+          );
+          setSyncingVoiceMode(false);
+          return;
+        }
+      }
+
+      const res = await fetch("/api/voice-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asrMode: next, ttsMode: next }),
+      });
+      if (!res.ok) throw new Error("voice mode update failed");
+      setAsrModeState(next);
+      setTtsModeState(next);
+      localStorage.setItem(ASR_MODE_KEY, next);
+      localStorage.setItem(TTS_MODE_KEY, next);
+    } catch {
+      // keep old mode on request failure
+    } finally {
+      setSyncingVoiceMode(false);
+    }
+  };
 
   useEffect(() => {
     if (isCollapsed) {
@@ -204,6 +275,72 @@ function DashboardLayoutContent({
           </SidebarContent>
 
           <SidebarFooter className="p-3">
+            {!isCollapsed && (
+              <div className="mb-3 rounded-lg border p-2">
+                {/* ASR 识别模式 */}
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="text-xs text-muted-foreground">ASR</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs">
+                      {asrMode === "local" ? "离线" : "在线"}
+                    </span>
+                    <Switch
+                      checked={asrMode === "local"}
+                      disabled={syncingVoiceMode}
+                      onCheckedChange={checked =>
+                        void updateVoiceMode(checked ? "local" : "cloud")
+                      }
+                    />
+                  </div>
+                </div>
+                {/* TTS 合成模式 */}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-muted-foreground">TTS</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs">
+                      {ttsMode === "local" ? "离线" : "在线"}
+                    </span>
+                    <Switch
+                      checked={ttsMode === "local"}
+                      disabled={syncingVoiceMode}
+                      onCheckedChange={async (checked) => {
+                        const next = checked ? "local" : "cloud";
+                        setSyncingVoiceMode(true);
+                        try {
+                          if (next === "local") {
+                            try {
+                              const healthRes = await fetch("http://127.0.0.1:8001/health", {
+                                method: "GET",
+                                signal: AbortSignal.timeout(3000),
+                              });
+                              if (!healthRes.ok) throw new Error("Service unavailable");
+                            } catch {
+                              alert(
+                                "本地语音服务未启动，请先运行：\n\ncd D:\\DEMO\\SmartAgent4_demo\\local-voice-service\npython main.py\n\n或者双击运行 start-local-voice.bat"
+                              );
+                              setSyncingVoiceMode(false);
+                              return;
+                            }
+                          }
+                          const res = await fetch("/api/voice-mode", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ ttsMode: next }),
+                          });
+                          if (!res.ok) throw new Error("voice mode update failed");
+                          setTtsModeState(next);
+                          localStorage.setItem(TTS_MODE_KEY, next);
+                        } catch {
+                          // keep old mode on failure
+                        } finally {
+                          setSyncingVoiceMode(false);
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-3 rounded-lg px-1 py-1 hover:bg-accent/50 transition-colors w-full text-left group-data-[collapsible=icon]:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">

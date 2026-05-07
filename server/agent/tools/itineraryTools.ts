@@ -326,6 +326,17 @@ async function generateRealItinerary(
 
   console.log(`[ItineraryTools] Found: ${attractions.length} attractions, ${restaurants.length} restaurants, ${hotels.length} hotels`);
 
+  // 景点全空时直接返回友好错误（不触发 LLM 工具调用失败，而是让 LLM 用自然语言告知用户）
+  if (attractions.length === 0 && restaurants.length === 0) {
+    const keyMissing = !getAmapKey();
+    const hint = keyMissing
+      ? "（可能原因：高德地图 API Key 未配置或无效）"
+      : `（可能原因：${destination} 在高德地图中未找到足够数据）`;
+    throw new Error(
+      `无法获取${destination}的景点和餐厅信息${hint}。建议确认目的地名称，或检查高德地图 API 服务是否正常。`
+    );
+  }
+
   // 3. 根据偏好筛选
   let filteredAttractions = [...attractions];
   if (preferences) {

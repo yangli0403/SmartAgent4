@@ -8,11 +8,15 @@
 
 import http from "http";
 
-const ARK_API_KEY = process.env.ARK_API_KEY || "7c4d52bf-e540-4337-a9ab-1a5228acedaa";
+const ARK_API_KEY = process.env.ARK_API_KEY || "";
 const ARK_BASE_URL = process.env.ARK_API_URL || "https://ark.cn-beijing.volces.com/api/v3";
 const ARK_MODEL = process.env.ARK_MODEL || "ep-20250811200411-zctsd"; // DeepSeek
 
 const PORT = parseInt(process.env.ARK_PROXY_PORT || "3001", 10);
+
+if (!ARK_API_KEY) {
+  throw new Error("[Ark Proxy] ARK_API_KEY is required.");
+}
 
 // 车载助手系统提示词
 const SYSTEM_PROMPT = `你是"小智"，一个车载智能语音助手。你的特点：

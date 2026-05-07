@@ -24,7 +24,7 @@ const OPENAI_BASE_URL =
 // ==================== Volcengine ARK 回退配置 ====================
 
 const ARK_API_KEY =
-  process.env.ARK_API_KEY || "7c4d52bf-e540-4337-a9ab-1a5228acedaa";
+  process.env.ARK_API_KEY || "";
 const ARK_BASE_URL =
   process.env.ARK_API_URL || "https://ark.cn-beijing.volces.com/api/v3";
 const ARK_DEFAULT_MODEL =
@@ -49,6 +49,12 @@ console.log(
     USE_OPENAI_COMPAT ? "OpenAI-compatible" : "Volcengine ARK"
   } LLM, baseUrl: ${ACTIVE_BASE_URL}, model: ${DEFAULT_MODEL}`
 );
+
+if (!USE_OPENAI_COMPAT && !ARK_API_KEY) {
+  throw new Error(
+    "[LangChainAdapter] ARK_API_KEY is required when OPENAI_API_KEY is not configured."
+  );
+}
 
 // ==================== LLM 创建 ====================
 

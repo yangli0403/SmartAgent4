@@ -17,6 +17,135 @@ import { Streamdown } from "streamdown";
 import type { ChatUiAssistantMessage, ChatUiMessage, ChatUiThinkingMessage } from "@shared/chatTts";
 import { ThinkingBubble } from "./ThinkingBubble";
 import { TtsPlayback } from "@/components/TtsPlayback";
+import { ItineraryCards } from "./ItineraryCards";
+
+// ==================== Markdown 表格解析 ====================
+
+interface ParsedTableRow {
+  time: string;
+  type: string;
+  location: string;
+  activity: string;
+  transport: string;
+}
+
+interface ParsedItinerary {
+  header: string;  // "作息：07:30 起床，23:00 就寝"
+  dayTitle: string;  // "## 第1天（2026-05-07）"
+  rows: ParsedTableRow[];
+  footer?: string;  // 表格后的内容
+}
+
+/**
+ * 解析 markdown 表格，提取行程数据
+ */
+function parseItineraryTable(content: string): ParsedItinerary | null {
+  // 匹配作息信息
+  const headerMatch = content.match(/作[息息]：(\d{2}:\d{2})[^，,]*[，起床]*,[^，,]*(\d{2}:\d{2})/);
+  
+  // 匹配 ## 第X天 标题
+  const dayTitleMatch = content.match(/(##\s*第\d+天[（(][^）)]*[）)]?)/);
+  
+  // 匹配表格行
+  const tableMatch = content.match(/\|[^|]+\|([^|]+\|)+/g);
+  if (!tableMatch || tableMatch.length < 2) return null;
+
+  const rows: ParsedTableRow[] = [];
+  
+  // 跳过表头和分隔符行，从第三行开始解析
+  for (let i = 2; i < tableMatch.length; i++) {
+    const row = tableMatch[i].split('|').filter(cell => cell.trim());
+    if (row.length >= 4) {
+      rows.push({
+        time: (row[0] || "").trim(),
+        type: (row[1] || "").trim(),
+        location: (row[2] || "").trim(),
+        activity: (row[3] || "").trim(),
+        transport: (row[4] || "").trim() || "-",
+      });
+    }
+  }
+
+  if (rows.length === 0) return null;
+
+  // 提取作息信息
+  const wakeMatch = content.match(/作[息息]：(\d{2}:\d{2})/);
+  const sleepMatch = content.match(/(\d{2}:\d{2})\s*就[寝卧]/);
+  
+  // 提取表格后的内容
+  const lastTableIndex = content.lastIndexOf(tableMatch[tableMatch.length - 1]);
+  const footer = content.slice(lastTableIndex + tableMatch[tableMatch.length - 1].length).trim();
+
+  return {
+    header: headerMatch ? `作息：${headerMatch[1]} 起床，${headerMatch[2]} 就寝` : "",
+    dayTitle: dayTitleMatch ? dayTitleMatch[1].replace(/^##\s*/, '') : "",
+    rows,
+    footer: footer.startsWith('---') ? footer.slice(footer.indexOf('---') + 3).trim() : footer,
+  };
+}
+
+/**
+ * 将行程表格渲染为卡片
+ */
+function ItineraryTableRenderer({ content }: { content: string }) {
+  const parsed = parseItineraryTable(content);
+  
+  if (!parsed) {
+    // 如果解析失败，回退到原始 markdown
+    return (
+      <Streamdown className="prose prose-sm prose-invert max-w-none break-words [&>p]:my-1 [&>table]:w-full [&>table]:text-xs">
+        {content}
+      </Streamdown>
+    );
+  }
+
+  // 转换数据格式
+  const stops = parsed.rows.map((row) => ({
+    time: row.time.split('-')[0] || row.time,
+    location: row.location,
+    activity: row.activity,
+    duration: "",
+    transport: row.transport !== "-" ? row.transport : undefined,
+  }));
+
+  // 提取目的地（从标题中）
+  const destMatch = content.match(/#\s*([^#\n]+?)\s*\d+日/);
+  const destination = destMatch ? destMatch[1].trim() : "行程";
+
+  // 提取日期
+  const dateMatch = content.match(/（(\d{4}-\d{2}-\d{2})）/);
+  const date = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
+
+  const itineraryData = {
+    destination,
+    date,
+    stops,
+    totalDuration: parsed.rows.length > 0 ? `${parsed.rows.length}个站点` : "",
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* 作息信息 */}
+      {parsed.header && (
+        <div className="text-xs text-white/50 flex items-center gap-2">
+          <span className="bg-white/10 rounded-full px-2 py-0.5">⏰ {parsed.header}</span>
+        </div>
+      )}
+      
+      {/* 卡片 */}
+      <ItineraryCards itinerary={itineraryData} />
+      
+      {/* 表格后的说明文字 */}
+      {parsed.footer && !parsed.footer.startsWith('*') && (
+        <div className="text-xs text-white/60 px-1">
+          <Streamdown className="prose prose-sm prose-invert max-w-none break-words [&>p]:my-1">
+            {parsed.footer.replace(/\*+$/, '').trim()}
+          </Streamdown>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ==================== 类型 ====================
 
@@ -171,6 +300,89 @@ function AssistantMessage({
   isSynthesizing?: boolean;
 }) {
   const parsed = parseEmotionTags(content);
+
+  // 检测行程 JSON
+  const itineraryMatch = content.match(/```json\s*(\{[\s\S]*?"itinerary"[\s\S]*?\})\s*```/);
+  const inlineItineraryMatch = content.match(/"itinerary"\s*:\s*\{[\s\S]*?"destination"[\s\S]*?"days"\s*:\s*\[[\s\S]*?\]\}/);
+  
+  if (itineraryMatch || inlineItineraryMatch) {
+    const jsonStr = itineraryMatch?.[1] || inlineItineraryMatch?.[0];
+    if (jsonStr) {
+      try {
+        // 提取 formattedText 部分作为主要内容
+        const fullMatch = content.match(/(\{[\s\S]*\})/);
+        if (fullMatch) {
+          const parsed2 = JSON.parse(fullMatch[1]);
+          const itData = parsed2.itinerary || parsed2;
+          
+          // 如果有 structuredItinerary 字段
+          if (itData.days && Array.isArray(itData.days)) {
+            // 将 days 结构转换为 ItineraryCards 需要的格式
+            const allStops = itData.days.flatMap((day: any) =>
+              (day.stops || []).map((stop: any) => ({
+                time: stop.timeStart || stop.time || "",
+                location: stop.location || "",
+                activity: stop.activity || "",
+                duration: stop.durationMin ? `${stop.durationMin}分钟` : (stop.duration || ""),
+                transport: stop.transitInfo,
+                note: stop.address,
+              }))
+            );
+            
+            const itineraryData = {
+              destination: itData.destination || "行程",
+              date: itData.days?.[0]?.date || new Date().toISOString().split("T")[0],
+              stops: allStops,
+              totalDuration: itData.totalDays ? `${itData.totalDays}天` : (itData.summary || ""),
+              preferences: itData.preferences,
+            };
+            
+            return (
+              <div className="rounded-xl p-3 bg-white/8 border border-white/10 backdrop-blur-sm">
+                <ItineraryCards itinerary={itineraryData} />
+                {/* 显示摘要 */}
+                {itData.summary && (
+                  <p className="mt-2 text-xs text-white/50 italic">{itData.summary}</p>
+                )}
+                {/* 显示 formattedText 中的其他内容 */}
+                {parsed2.formattedText && (
+                  <div className="mt-2 text-sm text-white/70">
+                    <Streamdown className="prose prose-sm prose-invert max-w-none break-words [&>p]:my-1">
+                      {parsed2.formattedText.replace(/```json\s*\{[\s\S]*?```/m, "").trim()}
+                    </Streamdown>
+                  </div>
+                )}
+              </div>
+            );
+          }
+        }
+      } catch (e) {
+        // JSON 解析失败，回退到纯文本渲染
+        console.warn("[AssistantMessage] Failed to parse itinerary JSON:", e);
+      }
+    }
+  }
+
+  // 检测行程表格（markdown 格式）
+  const hasMarkdownTable = /\| ?时间 ?\|/.test(content);
+  
+  if (hasMarkdownTable) {
+    return (
+      <div className="rounded-xl p-3 bg-white/8 border border-white/10 backdrop-blur-sm transition-colors">
+        <ItineraryTableRenderer content={content} />
+        {/* 情感标签 */}
+        <EmotionDisplay parsed={parsed} />
+        {(lazyTts || tts) && (
+          <TtsPlayback
+            tts={tts}
+            lazy={Boolean(lazyTts && !tts)}
+            onSynthesize={onSynthesize}
+            isSynthesizing={isSynthesizing}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl p-3 bg-white/8 border border-white/10 backdrop-blur-sm transition-colors">

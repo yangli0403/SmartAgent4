@@ -101,7 +101,29 @@ jspm_packages/
 tmp/
 temp/
 
+# Python virtual environments
+.venv/
+.venv311/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+
 # Database
 *.db
 *.sqlite
 *.sqlite3
+
+# Local voice service (large, machine-specific)
+local-voice-service/
+
+# Windows bat scripts (machine-specific)
+start-local-voice.bat

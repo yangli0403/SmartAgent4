@@ -18,6 +18,12 @@ import type {
   EmotionType,
   EmotionAction,
 } from "./types";
+import { getTtsMode } from "../voice/voiceMode";
+
+const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY || "";
+const DASHSCOPE_TTS_WS =
+  process.env.DASHSCOPE_TTS_WS_URL ||
+  "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
 
 // ==================== 默认配置 ====================
 
@@ -177,6 +183,30 @@ export interface TTSResponse {
   format: string;
 }
 
+async function synthesizeLocalTts(text: string): Promise<TTSResponse | null> {
+  const localTtsUrl =
+    process.env.LOCAL_TTS_URL || "http://127.0.0.1:8001/api/local-tts";
+  const response = await fetch(localTtsUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!response.ok) {
+    throw new Error(`Local TTS HTTP ${response.status}: ${await response.text()}`);
+  }
+  const data = (await response.json()) as {
+    audioBase64?: string;
+    format?: string;
+  };
+  if (!data.audioBase64) {
+    return null;
+  }
+  return {
+    audioBase64: data.audioBase64,
+    format: data.format || "wav",
+  };
+}
+
 // ==================== 客户端实现 ====================
 
 export class EmotionsSystemClient {
@@ -195,127 +225,139 @@ export class EmotionsSystemClient {
   }
 
   /**
-   * 检查 Emotions-System 服务是否可用
+   * 检查云端 DashScope CosyVoice 是否可用（通过 API Key 存在性判断）
    */
   async isAvailable(): Promise<boolean> {
-    if (!this.config.enabled) return false;
-
-    const now = Date.now();
-    if (
-      this._available !== null &&
-      now - this._lastHealthCheck < this.HEALTH_CHECK_INTERVAL
-    ) {
-      return this._available;
-    }
-
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-      const response = await fetch(`${this.config.baseUrl}/health`, {
-        method: "GET",
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-      this._available = response.ok;
-      this._lastHealthCheck = now;
-
-      console.log(
-        `[EmotionsSystemClient] Health check: ${this._available ? "OK" : "FAILED"}`
-      );
-      return this._available;
-    } catch (error) {
-      this._available = false;
-      this._lastHealthCheck = now;
-      console.warn(
-        `[EmotionsSystemClient] Health check failed: ${(error as Error).message}`
-      );
-      return false;
-    }
+    return Boolean(DASHSCOPE_API_KEY.trim());
   }
 
-  /**
-   * 调用 Emotions-System 的 TTS 接口合成语音
-   */
-  /** 供 chat 侧在无音频时展示上游（如 CosyVoice）错误摘要 */
+  /** 供 chat 侧在无音频时展示上游（CosyVoice）错误摘要 */
   getLastSynthesizeError(): string | null {
     return this._lastSynthesizeError;
   }
 
+  /**
+   * 调用百炼 DashScope CosyVoice WebSocket TTS 合成语音
+   * 文档：https://help.aliyun.com/zh/model-studio/cosyvoice-websocket-api
+   */
   async synthesize(request: TTSRequest): Promise<TTSResponse | null> {
-    this._lastSynthesizeError = null;
-    for (let attempt = 0; attempt <= this.config.retryCount; attempt++) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(
-          () => controller.abort(),
-          this.config.timeout
-        );
-
-        const form = new FormData();
-        form.set("text", request.text);
-        const emotion = request.emotion || "neutral";
-        const instruction = request.instruction || "";
-        form.set(
-          "emotion_instruction",
-          [instruction, emotion !== "neutral" ? `emotion:${emotion}` : ""]
-            .filter(Boolean)
-            .join(" | ")
-        );
-        if (request.voiceId && request.voiceId !== "default") {
-          form.set("voice_id", request.voiceId);
-        }
-
-        const response = await fetch(
-          `${this.config.baseUrl}/api/tts/synthesize`,
-          {
-            method: "POST",
-            body: form,
-            signal: controller.signal,
-          }
-        );
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-        }
-
-        const ct = response.headers.get("content-type") || "";
-        if (ct.includes("application/json")) {
-          const data = (await response.json()) as Record<string, unknown>;
-          const b64 = String(data.audio_base64 || data.audioBase64 || "");
-          if (!b64.trim()) {
-            throw new Error("TTS JSON response missing audio_base64");
-          }
-          return {
-            audioBase64: b64,
-            format: String(data.format || "wav"),
-          };
-        }
-
-        const buf = await response.arrayBuffer();
-        if (buf.byteLength < 64) {
-          throw new Error(
-            `TTS returned audio too small (${buf.byteLength} bytes), likely empty or invalid`
-          );
-        }
-        const audioBase64 = Buffer.from(buf).toString("base64");
-        return { audioBase64, format: "wav" };
-      } catch (error) {
-        const msg = (error as Error).message;
-        this._lastSynthesizeError = msg;
-        console.warn(
-          `[EmotionsSystemClient] Synthesize attempt ${attempt + 1} failed: ${msg}`
-        );
-        if (attempt < this.config.retryCount) {
-          await this.sleep(this.config.retryDelay * (attempt + 1));
-        }
-      }
+    if (!DASHSCOPE_API_KEY) {
+      throw new Error("DASHSCOPE_API_KEY is not configured");
     }
 
-    return null;
+    const model = process.env.DASHSCOPE_TTS_MODEL || "cosyvoice-v3-flash";
+    const voice = process.env.DASHSCOPE_TTS_VOICE || "longanyang"; // 中文女声
+    const sampleRate = parseInt(process.env.DASHSCOPE_TTS_SAMPLE_RATE || "22050", 10);
+    const format = process.env.DASHSCOPE_TTS_FORMAT || "wav";
+    const timeout = this.config.timeout;
+
+    return new Promise((resolve, reject) => {
+      const audioChunks: Buffer[] = [];
+      let finished = false;
+      const timers: ReturnType<typeof setTimeout>[] = [];
+
+      const cleanup = () => {
+        timers.forEach(clearTimeout);
+        timers.length = 0;
+      };
+
+      const done = (err?: Error) => {
+        if (finished) return;
+        finished = true;
+        cleanup();
+        if (err) {
+          this._lastSynthesizeError = err.message;
+        }
+        if (ws) {
+          try { ws.close(); } catch {}
+          ws = null as unknown as WebSocket;
+        }
+        if (err) { reject(err); return; }
+        if (audioChunks.length === 0) {
+          reject(new Error("CosyVoice returned no audio data"));
+          return;
+        }
+        const wavBuf = mergeMp3Chunks(audioChunks);
+        const b64 = Buffer.from(wavBuf).toString("base64");
+        resolve({ audioBase64: b64, format: "wav" });
+      };
+
+      let ws: WebSocket | null = new WebSocket(DASHSCOPE_TTS_WS, {
+        headers: { Authorization: `Bearer ${DASHSCOPE_API_KEY}` },
+      });
+
+      // 超时保护
+      timers.push(setTimeout(() => done(new Error("CosyVoice WebSocket timeout")), timeout));
+
+      ws.on("open", () => {
+        const taskId = crypto.randomUUID();
+        const runTask = {
+          header: {
+            action: "run-task",
+            task_id: taskId,
+            streaming: "duplex",
+          },
+          payload: {
+            task_group: "audio",
+            task: "tts",
+            function: "SpeechSynthesizer",
+            model,
+            parameters: {
+              text_type: "PlainText",
+              voice,
+              format,
+              sample_rate: sampleRate,
+              volume: 50,
+              rate: 1,
+              pitch: 1,
+            },
+            input: {},
+          },
+        };
+        ws!.send(JSON.stringify(runTask));
+      });
+
+      ws.on("message", (data: unknown, isBinary: boolean) => {
+        if (finished) return;
+        try {
+          if (isBinary) {
+            // 跳过 WAV header（44字节），只收集 PCM 数据
+            const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+            if (buf.length > 44) {
+              audioChunks.push(buf);
+            }
+          } else {
+            const msg = JSON.parse(String(data));
+            const action = msg.header?.action ?? msg.action;
+            if (action === "task-started") {
+              // 发送待合成文本
+              const continueTask = {
+                header: { action: "continue-task", task_id: msg.header.task_id },
+                payload: { input: { text: request.text } },
+              };
+              ws!.send(JSON.stringify(continueTask));
+              // 立即发送 finish-task
+              const finishTask = {
+                header: { action: "finish-task", task_id: msg.header.task_id },
+                payload: { input: {} },
+              };
+              ws!.send(JSON.stringify(finishTask));
+            } else if (action === "task-finished" || action === "finish-task") {
+              done();
+            } else if (action === "error" || msg.error) {
+              done(new Error(msg.message || msg.error || "CosyVoice unknown error"));
+            }
+          }
+        } catch (e) {
+          // 忽略解析错误，继续等待
+        }
+      });
+
+      ws.on("error", (err) => done(new Error(`CosyVoice WebSocket error: ${err.message}`)));
+      ws.on("close", (code) => {
+        if (!finished) done(new Error(`CosyVoice connection closed: code=${code}`));
+      });
+    });
   }
 
   /**
@@ -327,6 +369,45 @@ export class EmotionsSystemClient {
     text: string,
     _sessionId: string
   ): Promise<MultimodalSegment[]> {
+    if (getTtsMode() === "local") {
+      const { segments } = parseEmotionTags(text);
+      const localSegments: MultimodalSegment[] = [];
+      for (const segment of segments) {
+        try {
+          const tts = await synthesizeLocalTts(segment.text);
+          if (!tts?.audioBase64) {
+            throw new Error("Local TTS empty response");
+          }
+          localSegments.push({
+            text: segment.text,
+            audioBase64: tts?.audioBase64,
+            audioFormat: tts?.format || "wav",
+            emotion: this.normalizeEmotion(segment.tags.emotion),
+            actions: [],
+          });
+        } catch (error) {
+          console.warn(
+            `[EmotionsSystemClient] Local TTS failed: ${(error as Error).message}. Fallback to cloud TTS.`
+          );
+          const cloudTts = await this.synthesize({
+            text: segment.text,
+            emotion: segment.tags.emotion,
+            instruction: segment.tags.instruction,
+          });
+          localSegments.push({
+            text: segment.text,
+            audioBase64: cloudTts?.audioBase64 || undefined,
+            audioFormat: cloudTts?.format || "wav",
+            emotion: this.normalizeEmotion(segment.tags.emotion),
+            actions: [],
+          });
+        }
+      }
+      return localSegments.length > 0
+        ? localSegments
+        : this.createFallbackSegments(text);
+    }
+
     this._lastSynthesizeError = null;
     const available = await this.isAvailable();
     if (!available) {
@@ -417,6 +498,43 @@ export class EmotionsSystemClient {
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+}
+
+// ==================== 音频格式转换 ====================
+
+/**
+ * CosyVoice WebSocket 返回的二进制帧可能是：
+ * - WAV（全帧含 RIFF header）：每帧都是完整音频段，各自带 WAV header
+ * - MP3（流式分片）：第一帧是完整 MP3，后续帧是 MP3 分片需拼接
+ *
+ * 当前使用 WAV 格式，每帧自含 WAV header。
+ * 合并策略：第一帧保留完整 WAV，后续帧追加跳过 header 的 PCM 数据。
+ */
+function mergeMp3Chunks(chunks: Buffer[]): Buffer {
+  if (chunks.length === 0) return Buffer.alloc(0);
+
+  const WAV_HEADER_SIZE = 44;
+
+  // 判断第一帧是否带 WAV RIFF header
+  const first = chunks[0];
+  const isWav = first.length >= 4 &&
+    first[0] === 0x52 && first[1] === 0x49 && // "RIFF"
+    first[8] === 0x57 && first[9] === 0x41;   // "WAVE"
+
+  if (!isWav) {
+    // MP3 或纯 PCM：直接拼接
+    return Buffer.concat(chunks);
+  }
+
+  // WAV：取第一帧完整内容，后续帧去掉 header 后追加
+  const parts: Buffer[] = [first];
+  for (let i = 1; i < chunks.length; i++) {
+    if (chunks[i].length > WAV_HEADER_SIZE) {
+      parts.push(chunks[i].slice(WAV_HEADER_SIZE));
+    }
+  }
+
+  return Buffer.concat(parts);
 }
 
 // ==================== 单例工厂 ====================

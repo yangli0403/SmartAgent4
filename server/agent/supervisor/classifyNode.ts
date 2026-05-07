@@ -1,15 +1,15 @@
-/**
- * Classify Node — 任务分类节点
+﻿/**
+ * Classify Node �?任务分类节点
  *
- * 使用 LLM 结构化输出对用户输入进行领域分类和复杂度判断。
+ * 使用 LLM 结构化输出对用户输入进行领域分类和复杂度判断�?
  *
- * V2 增强：
- * - System Prompt 从硬编码改为运行时通过 DynamicPromptAssembler 动态生成
- * - Agent 列表从 AgentCardRegistry 动态获取，支持热插拔
+ * V2 增强�?
+ * - System Prompt 从硬编码改为运行时通过 DynamicPromptAssembler 动态生�?
+ * - Agent 列表�?AgentCardRegistry 动态获取，支持热插�?
  *
  * V3 增强（follow-up 意图延续）：
- * - 将最近对话摘要注入分类输入，让 LLM 能看到多轮上下文
- * - 新增 refineClassificationForFollowUp 规则纠偏，防止补充信息被误判为 general
+ * - 将最近对话摘要注入分类输入，�?LLM 能看到多轮上下文
+ * - 新增 refineClassificationForFollowUp 规则纠偏，防止补充信息被误判�?general
  */
 
 import type {
@@ -29,43 +29,43 @@ import type { IAgentCardRegistry } from "../discovery/types";
 import { appendGeneralAgentMemoryStepIfNeeded } from "./navigationMemoryPlan";
 
 /**
- * classifyNode 的 LLM 系统提示词（静态降级版本）
+ * classifyNode �?LLM 系统提示词（静态降级版本）
  *
- * 当 AgentCardRegistry 为空时使用此降级 Prompt。
- * 正常情况下使用 DynamicPromptAssembler 动态生成。
+ * �?AgentCardRegistry 为空时使用此降级 Prompt�?
+ * 正常情况下使�?DynamicPromptAssembler 动态生成�?
  */
-export const CLASSIFY_SYSTEM_PROMPT = `你是一个任务分类专家。根据用户输入，判断任务所属领域和复杂度。
+export const CLASSIFY_SYSTEM_PROMPT = `你是一个任务分类专家。根据用户输入，判断任务所属领域和复杂度�?
 
-可用领域：
-- navigation: 用户**明确要求**导航、路径规划、地图查询、天气、POI 搜索等（如「怎么去」「规划路线」「导航到」）；**不要**把「仅陈述家住哪、公司在哪」判成导航
-- multimedia: 音乐搜索/播放、视频搜索、歌曲推荐、歌单管理等（**含「搜索/找 XX 的歌」「推荐歌手」等，勿判成 general**）
-- file_system: 文件搜索、打开、目录操作、复制/创建；**以及 C 盘/系统盘/磁盘空间/垃圾与临时文件体量分析**（须走 fileAgent 内置工具，勿判为 general）
+可用领域�?
+- navigation: 用户**明确要求**导航、路径规划、地图查询、天气、POI 搜索等（如「怎么去」「规划路线」「导航到」）�?*不要**把「仅陈述家住哪、公司在哪」判成导�?
+- multimedia: 音乐搜索/播放、视频搜索、歌曲推荐、歌单管理等�?*含「搜�?�?XX 的歌」「推荐歌手」等，勿判成 general**�?
+- file_system: 文件搜索、打开、目录操作、复�?创建�?*以及 C �?系统�?磁盘空间/垃圾与临时文件体量分�?*（须�?fileAgent 内置工具，勿判为 general�?
 - office: 飞书消息发送、日程创建、群组管理、办公协同等（如「发飞书消息」「创建日程」「建个群」）
 - service: 餐厅搜索、外卖下单、生活服务推荐等（如「附近有什么好吃的」「帮我订外卖」「找川菜馆」）
-- general: 闲聊、知识问答、建议咨询、**仅同步住址/上班地等个人信息**（无导航意图）
+- general: 闲聊、知识问答、建议咨询�?*仅同步住址/上班地等个人信息**（无导航意图�?
 - cross_domain: 涉及多个领域的复合任务（如「帮我规划上海行程并发到飞书群」「找个餐厅然后帮我建个群约同事」）
 
-## 意图延续规则（多轮对话，必读）
-当提供了 [对话上下文] 时，你必须结合上下文判断用户意图：
-- 如果上一轮 Agent 向用户追问了某些信息（如邮箱、手机号、地址、时间、ID 等），而用户本轮消息是在**回答/补充**这些信息，则应**沿用上一轮的领域分类**，而不是判为 general。
-- 例：上一轮 officeAgent 问「请提供陈威的邮箱」，用户回复「chenwei@example.com」→ 应判为 **office**，不是 general。
-- 例：上一轮 navigationAgent 问「请问您的出发地是哪里」，用户回复「我在望京」→ 应判为 **navigation**，不是 general。
-- 判断依据：用户消息是否在回答上一轮 AI 的提问，而非发起全新话题。
+## 意图延续规则（多轮对话，必读�?
+当提供了 [对话上下文] 时，你必须结合上下文判断用户意图�?
+- 如果上一�?Agent 向用户追问了某些信息（如邮箱、手机号、地址、时间、ID 等），而用户本轮消息是�?*回答/补充**这些信息，则�?*沿用上一轮的领域分类**，而不是判�?general�?
+- 例：上一�?officeAgent 问「请提供陈威的邮箱」，用户回复「chenwei@example.com」→ 应判�?**office**，不�?general�?
+- 例：上一�?navigationAgent 问「请问您的出发地是哪里」，用户回复「我在望京」→ 应判�?**navigation**，不�?general�?
+- 判断依据：用户消息是否在回答上一�?AI 的提问，而非发起全新话题�?
 
 复杂度判断：
-- simple: 单步操作或简单问答，只需一个 Agent 即可完成
-- moderate: 需要多步操作但在单一领域内，需要规划
+- simple: 单步操作或简单问答，只需一�?Agent 即可完成
+- moderate: 需要多步操作但在单一领域内，需要规�?
 - complex: 跨领域协作或多步条件判断，需要详细规划和协调
 
-可用 Agent：
+可用 Agent�?
 - fileAgent: 文件系统操作
-- navigationAgent: 导航和地图操作、天气查询、行程规划
+- navigationAgent: 导航和地图操作、天气查询、行程规�?
 - multimediaAgent: 音乐和多媒体操作
-- officeAgent: 飞书消息发送、日程创建、群组管理
-- serviceAgent: 餐厅搜索、外卖下单、生活服务
-- generalAgent: 通用对话和知识问答
+- officeAgent: 飞书消息发送、日程创建、群组管�?
+- serviceAgent: 餐厅搜索、外卖下单、生活服�?
+- generalAgent: 通用对话和知识问�?
 
-请以 JSON 格式输出（不要包含其他文字）：
+请以 JSON 格式输出（不要包含其他文字）�?
 {
   "domain": "navigation|multimedia|file_system|office|service|general|cross_domain",
   "complexity": "simple|moderate|complex",
@@ -77,11 +77,11 @@ export const CLASSIFY_SYSTEM_PROMPT = `你是一个任务分类专家。根据�
  * 获取分类 Prompt
  *
  * 优先使用 DynamicPromptAssembler 动态生成，
- * 注册表为空时降级使用静态 Prompt。
+ * 注册表为空时降级使用静�?Prompt�?
  */
 /**
- * 明显的音乐类请求若被 LLM 判成 general，会导致走 generalAgent（无网易云 search 工具），
- * 模型只能编造「搜索功能用不了」。在出结果前用规则纠偏。
+ * 明显的音乐类请求若被 LLM 判成 general，会导致�?generalAgent（无网易�?search 工具），
+ * 模型只能编造「搜索功能用不了」。在出结果前用规则纠偏�?
  */
 function refineClassificationForMusicIntent(
   userText: string,
@@ -100,7 +100,7 @@ function refineClassificationForMusicIntent(
 
   if (looksMusic && classification.domain === "general") {
     console.log(
-      "[ClassifyNode] Rule override: music-like utterance was general → multimedia"
+      "[ClassifyNode] Rule override: music-like utterance was general �?multimedia"
     );
     classification.domain = "multimedia";
     classification.requiredAgents = ["multimediaAgent"];
@@ -109,9 +109,9 @@ function refineClassificationForMusicIntent(
   }
 
   /**
-   * 复合音乐任务（搜歌 + 歌词/专辑/「最新」等）：**simple** + 单步 multimediaAgent。
-   * moderate/complex 会走 plan 多步，步骤间难传歌曲 ID，末步常被 generalAgent 总结 → 易变「无法获取」。
-   * cross_domain 若实为纯音乐链路，也收敛到 multimedia。
+   * 复合音乐任务（搜�?+ 歌词/专辑/「最新」等）：**simple** + 单步 multimediaAgent�?
+   * moderate/complex 会走 plan 多步，步骤间难传歌曲 ID，末步常�?generalAgent 总结 �?易变「无法获取」�?
+   * cross_domain 若实为纯音乐链路，也收敛�?multimedia�?
    */
   const compoundMusicChain =
     /(?:歌词|专辑|新歌|最新)/.test(t) &&
@@ -125,7 +125,7 @@ function refineClassificationForMusicIntent(
       classification.domain === "cross_domain")
   ) {
     console.log(
-      "[ClassifyNode] Rule override: compound music → simple (single multimediaAgent tool chain)"
+      "[ClassifyNode] Rule override: compound music �?simple (single multimediaAgent tool chain)"
     );
     classification.domain = "multimedia";
     classification.complexity = "simple";
@@ -136,7 +136,7 @@ function refineClassificationForMusicIntent(
 }
 
 /**
- * 用户是否在问 C 盘 / 磁盘空间 / 系统垃圾（与 refineClassificationForDiskIntent 规则一致）
+ * 用户是否在问 C �?/ 磁盘空间 / 系统垃圾（与 refineClassificationForDiskIntent 规则一致）
  */
 export function userMessageLooksLikeDiskIntent(userText: string): boolean {
   const t = userText.trim();
@@ -149,10 +149,43 @@ export function userMessageLooksLikeDiskIntent(userText: string): boolean {
 }
 
 /**
- * C 盘 / 磁盘空间 / 系统垃圾类请求若被判成 general，会走 generalAgent（无 get_disk_health），
- * 模型只能编造「无法访问磁盘」或纯手动教程。出结果前强制 file_system + fileAgent。
+ * 新闻/资讯查询类请求若被误判为 navigation/office 等，会导致走�?Agent（无新闻工具），
+ * 模型无法调用 get_latest_news。出结果前强�?general + generalAgent�?
  */
-/** @internal 导出供单元测试覆盖磁盘意图纠偏规则 */
+export function refineClassificationForNewsIntent(
+  userText: string,
+  classification: TaskClassification
+): void {
+  const t = userText.trim();
+  if (!t) return;
+
+  // 新闻类关键词
+  const looksNews =
+    /新闻|资讯|头条|日报|早报|晚报|热点|时事|今日新闻|今日资讯|今日头条/.test(t) ||
+    /(?:推送|发送|发送给我|给我发).{0,10}(?:新闻|资讯|热点|头条)/.test(t) ||
+    /(?:今天|今日|早上|每天).{0,10}(?:新闻|资讯|热点|头条|推送)/.test(t) ||
+    /(?:再|重新).{0,6}(?:新闻|资讯|推送|执行)/.test(t) ||
+    /热搜|热榜|今日热搜/.test(t);
+
+  if (looksNews) {
+    const wrongAgent =
+      classification.domain === "office" ||
+      classification.domain === "navigation" ||
+      (classification.requiredAgents?.includes("officeAgent") ?? false) ||
+      (classification.requiredAgents?.includes("navigationAgent") ?? false);
+
+    if (wrongAgent) {
+      console.log(
+        `[ClassifyNode] Rule override: news intent detected (was ${classification.domain}), forcing �?general + generalAgent`
+      );
+      classification.domain = "general";
+      classification.complexity = "simple";
+      classification.requiredAgents = ["generalAgent"];
+      classification.reasoning =
+        `[rule:news_intent] ${classification.reasoning || ""}`.trim();
+    }
+  }
+}
 export function refineClassificationForDiskIntent(
   userText: string,
   classification: TaskClassification
@@ -170,7 +203,7 @@ export function refineClassificationForDiskIntent(
 
   if (wrongAgent) {
     console.log(
-      "[ClassifyNode] Rule override: disk/C-drive / space intent → file_system + fileAgent"
+      "[ClassifyNode] Rule override: disk/C-drive / space intent �?file_system + fileAgent"
     );
     classification.domain = "file_system";
     classification.complexity = "simple";
@@ -181,8 +214,8 @@ export function refineClassificationForDiskIntent(
 }
 
 /**
- * 用户是否在分析本机某目录的文件分布/占比（与「C 盘」磁盘意图不同，易被 LLM 判成 general）
- * 例：「帮我分析一下下载目录的文件占比」——须走 fileAgent + analyze_directory
+ * 用户是否在分析本机某目录的文件分�?占比（与「C 盘」磁盘意图不同，易被 LLM 判成 general�?
+ * 例：「帮我分析一下下载目录的文件占比」——须�?fileAgent + analyze_directory
  */
 export function userMessageLooksLikeDirectoryInventoryIntent(
   userText: string
@@ -190,7 +223,7 @@ export function userMessageLooksLikeDirectoryInventoryIntent(
   const t = userText.trim();
   if (!t) return false;
   const mentionsUserFolder =
-    /(?:下载|桌面|文档|视频|图片|音乐)(?:目录|文件夹)?|Downloads|Desktop|Documents/i.test(
+    /(?:下载|桌面|文档|视频|图片|音乐)(?:目录|文件夹)|Downloads|Desktop|Documents/i.test(
       t
     ) || /用户目录|主目录|~\//i.test(t);
   const asksInventory =
@@ -201,7 +234,7 @@ export function userMessageLooksLikeDirectoryInventoryIntent(
 }
 
 /**
- * 目录占比/分布类若被判成 general，会走 generalAgent（无 analyze_directory），模型易回答「无法访问」。
+ * 目录占比/分布类若被判�?general，会�?generalAgent（无 analyze_directory），模型易回答「无法访问」�?
  */
 export function refineClassificationForDirectoryInventoryIntent(
   userText: string,
@@ -217,7 +250,7 @@ export function refineClassificationForDirectoryInventoryIntent(
 
   if (wrongAgent) {
     console.log(
-      "[ClassifyNode] Rule override: directory file inventory → file_system + fileAgent"
+      "[ClassifyNode] Rule override: directory file inventory �?file_system + fileAgent"
     );
     classification.domain = "file_system";
     classification.complexity = "simple";
@@ -230,15 +263,15 @@ export function refineClassificationForDirectoryInventoryIntent(
 // ==================== V3 新增：Follow-up 意图延续 ====================
 
 /**
- * 从对话历史中提取上一轮的任务域信息
+ * 从对话历史中提取上一轮的任务域信�?
  *
- * 扫描 messages 中倒数第二条 AI 消息之前的上下文，
- * 推断上一轮任务所属的领域。
+ * 扫描 messages 中倒数第二�?AI 消息之前的上下文�?
+ * 推断上一轮任务所属的领域�?
  */
 function detectPreviousTurnDomain(
   messages: readonly import("@langchain/core/messages").BaseMessage[]
 ): string | null {
-  // 找到最近的 AI 消息（即上一轮 Agent 的回复）
+  // 找到最近的 AI 消息（即上一�?Agent 的回复）
   const reversedMessages = [...messages].reverse();
   const lastAIMessage = reversedMessages.find(
     (m) => m instanceof AIMessage || m._getType() === "ai"
@@ -252,7 +285,7 @@ function detectPreviousTurnDomain(
       : JSON.stringify(lastAIMessage.content || "");
 
   // 通过 AI 回复内容中的关键词推断上一轮域
-  // office 域特征：飞书、消息、日程、群、邮箱、open_id、发送
+  // office 域特征：飞书、消息、日程、群、邮箱、open_id、发�?
   if (
     /飞书|消息|日程|群组|建群|邮箱|手机号|open_id|user_id|发送消息|创建日程|创建群/.test(
       aiText
@@ -260,19 +293,19 @@ function detectPreviousTurnDomain(
   ) {
     return "office";
   }
-  // navigation 域特征
+  // navigation 域特�?
   if (/导航|路线|出发地|目的地|路径|规划|天气|地图|POI/.test(aiText)) {
     return "navigation";
   }
-  // multimedia 域特征
+  // multimedia 域特�?
   if (/歌曲|歌手|专辑|播放|音乐|歌单|歌词/.test(aiText)) {
     return "multimedia";
   }
-  // file_system 域特征
+  // file_system 域特�?
   if (/文件|目录|磁盘|C盘|文件夹|清理/.test(aiText)) {
     return "file_system";
   }
-  // service 域特征
+  // service 域特�?
   if (/餐厅|外卖|美食|推荐|附近/.test(aiText)) {
     return "service";
   }
@@ -283,7 +316,7 @@ function detectPreviousTurnDomain(
 /**
  * 判断当前用户消息是否看起来像是在补充信息（回答上一轮追问）
  *
- * 泛化检测：包含邮箱、手机号、ID、地址、时间、人名+联系方式等模式
+ * 泛化检测：包含邮箱、手机号、ID、地址、时间、人�?联系方式等模�?
  */
 function looksLikeSupplementaryInfo(userText: string): boolean {
   const t = userText.trim();
@@ -292,21 +325,21 @@ function looksLikeSupplementaryInfo(userText: string): boolean {
   // 包含邮箱地址
   if (/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(t)) return true;
 
-  // 包含手机号（中国大陆）
+  // 包含手机号（中国大陆�?
   if (/1[3-9]\d{9}/.test(t)) return true;
 
-  // 包含各种 ID 格式（open_id, user_id, ou_ 开头等）
+  // 包含各种 ID 格式（open_id, user_id, ou_ 开头等�?
   if (/(?:open_id|user_id|ou_|on_)[a-zA-Z0-9_]+/.test(t)) return true;
 
-  // 短消息 + 明显是在回答问题（"是xxx"、"xxx的邮箱/手机/账号是"）
+  // 短消�?+ 明显是在回答问题�?是xxx"�?xxx的邮�?手机/账号�?�?
   if (t.length < 100 && /(?:邮箱|手机|账号|号码|电话|地址|ID|id)\s*(?:是|为|：|:)/.test(t)) return true;
 
-  // 非常短的消息（<30字），且不包含动词/请求词，很可能是补充回答
+  // 非常短的消息�?30字），且不包含动�?请求词，很可能是补充回答
   if (
     t.length < 30 &&
     !/(?:帮我|请|查|搜|找|发|建|创建|规划|导航|播放|推荐|分析|打开)/.test(t)
   ) {
-    // 但要排除纯闲聊（你好、谢谢等）
+    // 但要排除纯闲聊（你好、谢谢等�?
     if (!/^(?:你好|谢谢|好的|嗯|哦|再见|拜拜|ok|OK)/.test(t)) {
       return true;
     }
@@ -318,27 +351,27 @@ function looksLikeSupplementaryInfo(userText: string): boolean {
 /**
  * Follow-up 意图延续纠偏
  *
- * 当 LLM 将用户的补充信息误判为 general 时，
- * 根据上一轮对话的任务域进行纠偏。
+ * �?LLM 将用户的补充信息误判�?general 时，
+ * 根据上一轮对话的任务域进行纠偏�?
  *
- * 适用于所有域的 follow-up 场景，不仅限于 office。
+ * 适用于所有域�?follow-up 场景，不仅限�?office�?
  */
 export function refineClassificationForFollowUp(
   userText: string,
   classification: TaskClassification,
   messages: readonly import("@langchain/core/messages").BaseMessage[]
 ): void {
-  // 仅在被判为 general 时触发纠偏
+  // 仅在被判�?general 时触发纠�?
   if (classification.domain !== "general") return;
 
-  // 检测上一轮的任务域
+  // 检测上一轮的任务�?
   const prevDomain = detectPreviousTurnDomain(messages);
   if (!prevDomain || prevDomain === "general") return;
 
   // 检测当前消息是否像补充信息
   if (!looksLikeSupplementaryInfo(userText)) return;
 
-  // 域名到 Agent 的映射
+  // 域名�?Agent 的映�?
   const domainAgentMap: Record<string, string> = {
     office: "officeAgent",
     navigation: "navigationAgent",
@@ -352,23 +385,23 @@ export function refineClassificationForFollowUp(
 
   console.log(
     `[ClassifyNode] Rule override: follow-up supplementary info detected. ` +
-      `general → ${prevDomain} (continuing previous turn intent)`
+      `general �?${prevDomain} (continuing previous turn intent)`
   );
 
   classification.domain = prevDomain;
   classification.complexity = "simple";
   classification.requiredAgents = [targetAgent];
   classification.reasoning =
-    `[rule:follow_up_intent] 用户正在补充上一轮 ${prevDomain} 任务所需的信息。${classification.reasoning || ""}`.trim();
+    `[rule:follow_up_intent] 用户正在补充上一�?${prevDomain} 任务所需的信息�?{classification.reasoning || ""}`.trim();
 }
 
-// ==================== 对话上下文摘要构建 ====================
+// ==================== 对话上下文摘要构�?====================
 
 /**
- * 从 messages 中构建最近对话摘要，用于注入分类输入
+ * �?messages 中构建最近对话摘要，用于注入分类输入
  *
- * 截取最近 N 条消息（不含当前用户消息），格式化为简洁的对话摘要。
- * 这让 LLM 在分类时能看到多轮上下文，避免孤立判断。
+ * 截取最�?N 条消息（不含当前用户消息），格式化为简洁的对话摘要�?
+ * 这让 LLM 在分类时能看到多轮上下文，避免孤立判断�?
  */
 function buildRecentConversationSummary(
   messages: readonly import("@langchain/core/messages").BaseMessage[],
@@ -376,7 +409,7 @@ function buildRecentConversationSummary(
 ): string {
   if (messages.length <= 1) return "";
 
-  // 取除最后一条之外的最近消息（最后一条是当前用户消息）
+  // 取除最后一条之外的最近消息（最后一条是当前用户消息�?
   const historyMessages = messages.slice(0, -1);
   const recentMessages = historyMessages.slice(-maxTurns * 2);
 
@@ -392,7 +425,7 @@ function buildRecentConversationSummary(
       typeof msg.content === "string"
         ? msg.content
         : JSON.stringify(msg.content || "");
-    // 截断过长的消息
+    // 截断过长的消�?
     const truncated =
       content.length > 120 ? content.slice(0, 120) + "..." : content;
     lines.push(`${role}: ${truncated}`);
@@ -420,15 +453,15 @@ function getClassifyPrompt(): string {
 /**
  * 任务分类节点
  *
- * 接收用户消息，调用 LLM 进行结构化分类，
- * 将分类结果写入 state.taskClassification。
+ * 接收用户消息，调�?LLM 进行结构化分类，
+ * 将分类结果写�?state.taskClassification�?
  */
 export async function classifyNode(
   state: SupervisorStateType
 ): Promise<Partial<SupervisorStateType>> {
   console.log("[ClassifyNode] Starting task classification...");
 
-  // 1. 提取最新用户消息
+  // 1. 提取最新用户消�?
   const messages = state.messages;
   const lastUserMessage = [...messages]
     .reverse()
@@ -439,7 +472,7 @@ export async function classifyNode(
       ? lastUserMessage.content
       : JSON.stringify(lastUserMessage?.content || "");
 
-  // 2. 附加上下文信息
+  // 2. 附加上下文信�?
   let contextInfo = "";
   if (state.context) {
     if (state.context.location) {
@@ -448,7 +481,7 @@ export async function classifyNode(
     contextInfo += `\n当前时间: ${state.context.currentTime}`;
   }
 
-  // 3. V3 新增：构建最近对话摘要
+  // 3. V3 新增：构建最近对话摘�?
   const conversationSummary = buildRecentConversationSummary(messages);
 
   let fullMessage = userText;
@@ -459,7 +492,7 @@ export async function classifyNode(
     fullMessage += `\n\n[上下文信息]${contextInfo}`;
   }
 
-  // 4. 获取动态 Prompt 并调用 LLM
+  // 4. 获取动�?Prompt 并调�?LLM
   const classifyPrompt = getClassifyPrompt();
 
   try {
@@ -471,7 +504,7 @@ export async function classifyNode(
 
     const registry = getAgentCardRegistry();
 
-    // 5. 验证分类结果（内置领域 + 已启用 Agent Card 的 domain）
+    // 5. 验证分类结果（内置领�?+ 已启�?Agent Card �?domain�?
     const validDomains = collectValidClassificationDomains(registry);
     const validComplexities: TaskComplexity[] = [
       "simple",
@@ -489,10 +522,12 @@ export async function classifyNode(
     refineClassificationForMusicIntent(userText, classification);
     refineClassificationForDiskIntent(userText, classification);
     refineClassificationForDirectoryInventoryIntent(userText, classification);
+    // V3 新增：新闻意图纠�?
+    refineClassificationForNewsIntent(userText, classification);
     // V3 新增：follow-up 意图延续纠偏
     refineClassificationForFollowUp(userText, classification, messages);
 
-    // 验证 requiredAgents：确保引用的 Agent 在注册表中存在
+    // 验证 requiredAgents：确保引用的 Agent 在注册表中存�?
     if (
       !classification.requiredAgents ||
       classification.requiredAgents.length === 0
@@ -502,7 +537,7 @@ export async function classifyNode(
         registry
       );
     } else if (registry.size() > 0) {
-      // 过滤掉注册表中不存在的 Agent
+      // 过滤掉注册表中不存在�?Agent
       const validatedAgents = classification.requiredAgents.filter((agentId) =>
         registry.has(agentId)
       );
@@ -552,7 +587,7 @@ export async function classifyNode(
 
     const registry = getAgentCardRegistry();
 
-    // 降级处理：先按 general，再应用音乐/磁盘纠偏（否则「分析 C 盘」会走错 generalAgent、无法调 get_disk_health）
+    // 降级处理：先�?general，再应用音乐/磁盘纠偏（否则「分�?C 盘」会走错 generalAgent、无法调 get_disk_health�?
     const fallback: TaskClassification = {
       domain: "general",
       complexity: "simple",
@@ -563,7 +598,9 @@ export async function classifyNode(
     refineClassificationForMusicIntent(userText, fallback);
     refineClassificationForDiskIntent(userText, fallback);
     refineClassificationForDirectoryInventoryIntent(userText, fallback);
-    // V3 新增：降级时也应用 follow-up 纠偏
+    // V3 新增：新闻意图纠�?
+    refineClassificationForNewsIntent(userText, fallback);
+    // V3 新增：降级时也应�?follow-up 纠偏
     refineClassificationForFollowUp(userText, fallback, messages);
 
     if (!fallback.requiredAgents || fallback.requiredAgents.length === 0) {
@@ -604,10 +641,10 @@ export async function classifyNode(
 }
 
 /**
- * 路由函数：根据分类结果决定执行路径
+ * 路由函数：根据分类结果决定执行路�?
  *
- * - simple → 直接进入 execute 节点（已有默认单步计划）
- * - moderate / complex → 进入 plan 节点
+ * - simple �?直接进入 execute 节点（已有默认单步计划）
+ * - moderate / complex �?进入 plan 节点
  */
 export function routeByComplexity(
   state: SupervisorStateType
@@ -619,7 +656,7 @@ export function routeByComplexity(
   return "plan";
 }
 
-/** 内置分类领域 + 各 Agent Card 声明的 domain，供 LLM 输出校验 */
+/** 内置分类领域 + �?Agent Card 声明�?domain，供 LLM 输出校验 */
 function collectValidClassificationDomains(
   registry: IAgentCardRegistry
 ): Set<string> {
@@ -637,7 +674,7 @@ function collectValidClassificationDomains(
 }
 
 /**
- * 根据领域解析默认 Agent 列表：优先 AgentCardRegistry.findByDomain，再回退硬编码。
+ * 根据领域解析默认 Agent 列表：优�?AgentCardRegistry.findByDomain，再回退硬编码�?
  */
 export function resolveAgentsForDomain(
   domain: TaskDomain,

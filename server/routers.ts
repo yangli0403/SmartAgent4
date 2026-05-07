@@ -18,6 +18,74 @@ import * as db from "./db";
 import { runAgent } from "./agent/agentEngine";
 import { getSmartAgentApp } from "./agent/smartAgentApp";
 
+// ==================== Omni TTS 摘要提取 ====================
+
+/**
+ * 从 LLM 回复中提取 TTS 播报摘要。
+ * 策略：取第一个完整句子（句号/问号/感叹号结尾），最多 150 字。
+ * 如果没有完整句子，取前 150 字。
+ */
+/**
+ * 从 LLM 回复中智能提取 TTS 播报内容。
+ *
+ * 策略：
+ * - 纯对话（< 80字）：完整播报
+ * - 行程/表格类内容：提取目的地+天数+总景点数，格式化为流畅播报句
+ * - 数字列表/天气数据：提取关键数字和结论句
+ * - 其他内容：取第一句完整句（最多 200 字）
+ */
+function extractSummary(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+
+  // 策略1：短对话完整播报
+  if (trimmed.length <= 80 && !/^#{1,3}\s/.test(trimmed) && !/\|.*\|/.test(trimmed)) {
+    return trimmed;
+  }
+
+  // 策略2：行程/表格类内容（包含高德表格或 generate_itinerary 结果）
+  if (/[#*]?\s*(第[一二两三四五六七1-7]天|日行程|景点|游览)/.test(trimmed) && /\|.*\|/.test(trimmed)) {
+    const dayMatch = trimmed.match(/(?:第 ?)?([一二两三四五六七1-7]) ?天/);
+    const destMatch = trimmed.match(/(?:北京|上海|深圳|广州|杭州|成都|重庆|西安|苏州|南京|武汉|长沙|青岛|天津|大连|厦门|昆明|桂林|三亚|哈尔滨|长春|沈阳|济南|郑州|石家庄|福州|南昌|合肥|太原|呼和浩特|乌鲁木齐|拉萨|西宁|兰州|银川|贵阳|南宁|海口|.*?)[一两二三四五六日天]/);
+    const dest = destMatch ? destMatch[0].match(/^[^\d\s,，]{2,6}/)?.[0] || "" : "";
+    const days = dayMatch ? dayMatch[1].replace(/[1-7]/, (m: string) => ["一","二","三","四","五","六","日"][parseInt(m) - 1]) : "多";
+    const sights = (trimmed.match(/🏛️|景点|游览/g) || []).length;
+    const stopMatch = trimmed.match(/景点[：:]\s*(\d+)/);
+    const stopCount = stopMatch ? stopMatch[1] : (sights > 0 ? String(sights) : "几");
+
+    const summary = dest
+      ? `${dest}${days}日行程规划已完成，共${stopCount}个景点。`
+      : `${days}日行程规划已完成，共${stopCount}个景点。`;
+    if (summary.length <= 200) return summary;
+  }
+
+  // 策略3：天气数据类
+  if (/天气|温度|湿度|风力|空气质量/.test(trimmed) && /\d+°/.test(trimmed)) {
+    const cityMatch = trimmed.match(/([^\s，,]{2,6})(?:今天|今日|天气)/);
+    const tempMatch = trimmed.match(/(\d+)[-~到]\d+°?C?/);
+    const condMatch = trimmed.match(/(晴|阴|多云|雨|雪|雷阵雨|小雨|中雨|大雨|雾|霾|沙尘)/);
+    const city = cityMatch ? cityMatch[1] : "";
+    const temp = tempMatch ? tempMatch[0] : "";
+    const cond = condMatch ? condMatch[0] : "";
+    if (city && temp) {
+      const summary = `${city}今天${cond}，${temp}。`;
+      if (summary.length <= 200) return summary;
+    }
+  }
+
+  // 策略4：新闻/资讯类（提取第一段或第一句）
+  if (/最新消息|据.*报道|今日关注|资讯|新闻/.test(trimmed)) {
+    const firstPara = trimmed.split(/\n\n/)[0].replace(/[#*`~]/g, "").trim();
+    const match = firstPara.match(/^[^。！？.?!]{5,200}[。？！.?!]/);
+    if (match) return match[0].trim();
+  }
+
+  // 策略5：默认取第一句（最多 200 字）
+  const match = trimmed.match(/^[^。！？.?!]{5,200}[。？！.?!]/);
+  if (match) return match[0].trim();
+  return trimmed.slice(0, 200);
+}
+
 // ==================== 初始化 SmartAgentApp（单例，服务启动时初始化）====================
 let smartAgentReady = false;
 let smartAgentInitError: string | null = null;
@@ -40,6 +108,7 @@ import {
   deleteMemory,
 } from "./memory/memorySystem";
 import { runUserMemoryMaintenance } from "./memory/memoryMaintenance";
+import { auditMemoryExtraction } from "./memory/extractionAudit";
 import {
   PERSONALITIES,
   type PersonalityType,
@@ -262,6 +331,38 @@ export const appRouter = router({
         return { tts: payload };
       }),
 
+    /**
+     * Omni 模式专用：对话完成后合成摘要 TTS
+     * - 自动从 LLM 回复文本中提取或生成摘要
+     * - 仅合成前 150 字（避免播报过长）
+     * - 返回 Base64 音频供前端播放
+     */
+    synthesizeOmniSummary: protectedProcedure
+      .input(
+        z.object({
+          /** LLM 生成的完整回复文本 */
+          fullResponse: z.string().min(1),
+          sessionId: z.number().nullable().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const user = await ensureUser(ctx);
+        const sessionKey = String(input.sessionId ?? user.id);
+
+        // 提取摘要：取第一句完整句，或前 150 字
+        const summaryText = extractSummary(input.fullResponse);
+
+        console.log(`[Omni] synthesizeOmniSummary: full=${input.fullResponse.length}chars → summary="${summaryText}"`);
+
+        // 调用 Emotions TTS 合成
+        const { payload } = await synthesizeReplyTts(summaryText, sessionKey);
+
+        return {
+          summary: summaryText,
+          tts: payload,
+        };
+      }),
+
     getHistory: protectedProcedure
       .input(
         z.object({
@@ -357,6 +458,44 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const user = await ensureUser(ctx);
         console.log("[Memory] create 请求: userId=%s kind=%s type=%s contentLen=%s", user.id, input.kind, input.type, input.content?.length ?? 0);
+
+        // 审计层：重要性门控 + 去重校验
+        const auditResult = await auditMemoryExtraction({
+          userId: user.id,
+          content: input.content,
+          type: input.type,
+          kind: input.kind,
+          importance: input.importance ?? 0.5,
+          confidence: input.confidence ?? 0.8,
+          versionGroup: input.versionGroup,
+          tags: input.tags,
+        });
+
+        if (auditResult.verdict === "REJECT") {
+          console.warn("[Memory] create 审计拒绝: %s", auditResult.feedbackMessage);
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: auditResult.feedbackMessage,
+          });
+        }
+
+        if (auditResult.verdict === "MERGE" && auditResult.matchedMemory) {
+          // 合并模式：更新已有记忆而非新建
+          const { matchedMemory, similarityScore } = auditResult;
+          await updateMemory(matchedMemory.id, {
+            content: input.content,
+            importance: input.importance ?? 0.5,
+            confidence: input.confidence ?? 0.8,
+            tags: input.tags,
+          });
+          console.log(
+            "[Memory] create 合并写入: matchedId=%s similarity=%.2f",
+            matchedMemory.id,
+            similarityScore
+          );
+          return { ...matchedMemory, merged: true, similarityScore };
+        }
+
         const memory = await addMemory({
           userId: user.id,
           type: input.type,
