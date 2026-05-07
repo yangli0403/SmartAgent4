@@ -214,13 +214,26 @@ async function playBase64Audio(base64Data: string): Promise<void> {
     const isWav = bytes.length >= 12 &&
       bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
       bytes[8] === 0x57 && bytes[9] === 0x41 && bytes[10] === 0x56 && bytes[11] === 0x45;
-    const pcmBytes = isWav ? bytes.slice(44) : bytes;
-    const ctx = new AudioContext({ sampleRate: 16000 });
+    const ctx = new AudioContext();
     await ctx.resume();
-    const int16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.byteLength / 2);
+
+    if (isWav) {
+      // WAV 文件自带采样率头信息，必须交给浏览器解码，避免把 22050Hz 误当作 16000Hz 播放导致变慢、降调。
+      const wavBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      const audioBuffer = await ctx.decodeAudioData(wavBuffer.slice(0));
+      const src = ctx.createBufferSource();
+      src.buffer = audioBuffer;
+      src.connect(ctx.destination);
+      src.start();
+      return;
+    }
+
+    // 非 WAV 兜底按 CosyVoice 默认 PCM 采样率播放；在线 TTS 通常返回 WAV，会走上面的解码分支。
+    const fallbackSampleRate = 22050;
+    const int16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
     const f32 = new Float32Array(int16.length);
     for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768;
-    const buf = ctx.createBuffer(1, f32.length, 16000);
+    const buf = ctx.createBuffer(1, f32.length, fallbackSampleRate);
     buf.copyToChannel(f32, 0);
     const src = ctx.createBufferSource();
     src.buffer = buf;
@@ -325,6 +338,12 @@ export default function Cockpit() {
     );
   };
 
+  const synthesizeOmniSummaryMutation = trpc.chat.synthesizeOmniSummary.useMutation({
+    onError: (error) => {
+      toast.error("Omni 摘要语音合成失败: " + error.message);
+    },
+  });
+
   const sendMessageMutation = trpc.chat.sendMessage.useMutation({
     onSuccess: (data) => {
       setMessages((prev) => {
@@ -405,7 +424,7 @@ export default function Cockpit() {
     try {
       // 先清理噪声字符再合成
       const cleaned = cleanTextForTts(fullResponse);
-      const result = await trpc.chat.synthesizeOmniSummary.mutate({
+      const result = await synthesizeOmniSummaryMutation.mutateAsync({
         fullResponse: cleaned,
         sessionId: currentSessionId ?? undefined,
       });

@@ -217,14 +217,18 @@ export class OmniAudioManager {
         bytes[10] === 0x56 && bytes[11] === 0x45; // VE
 
       if (isWav) {
-        // 解析 WAV: 跳过前44字节的header
-        const dataOffset = 44;
-        const dataBytes = bytes.slice(dataOffset);
-        const pcmBuffer = dataBytes.buffer.slice(
-          dataBytes.byteOffset,
-          dataBytes.byteOffset + dataBytes.byteLength
+        // WAV 文件包含真实采样率（CosyVoice 默认 22050Hz）。不要剥离 header 后按 AudioContext 采样率当 PCM 播放，
+        // 否则会出现语速变慢/变快和音调异常。decodeAudioData 会按 WAV 头正确解码并由浏览器重采样到输出设备。
+        const wavBuffer = bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength
         );
-        return this.playAudio(pcmBuffer);
+        const audioBuffer = await this.audioContext.decodeAudioData(wavBuffer.slice(0));
+        const source = this.audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(this.audioContext.destination);
+        source.start();
+        return;
       } else {
         // 直接当作 PCM
         return this.playAudio(bytes.buffer as ArrayBuffer);
