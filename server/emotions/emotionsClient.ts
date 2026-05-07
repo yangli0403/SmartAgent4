@@ -19,6 +19,8 @@ import type {
   EmotionAction,
 } from "./types";
 import { getTtsMode } from "../voice/voiceMode";
+import WebSocket from "ws";
+import crypto from "crypto";
 
 const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY || "";
 const DASHSCOPE_TTS_WS =
@@ -328,24 +330,24 @@ export class EmotionsSystemClient {
             }
           } else {
             const msg = JSON.parse(String(data));
-            const action = msg.header?.action ?? msg.action;
-            if (action === "task-started") {
+            const event = msg.header?.event || msg.header?.action;
+            if (event === "task-started") {
               // 发送待合成文本
               const continueTask = {
-                header: { action: "continue-task", task_id: msg.header.task_id },
+                header: { action: "continue-task", task_id: msg.header.task_id, streaming: "duplex" },
                 payload: { input: { text: request.text } },
               };
               ws!.send(JSON.stringify(continueTask));
               // 立即发送 finish-task
               const finishTask = {
-                header: { action: "finish-task", task_id: msg.header.task_id },
+                header: { action: "finish-task", task_id: msg.header.task_id, streaming: "duplex" },
                 payload: { input: {} },
               };
               ws!.send(JSON.stringify(finishTask));
-            } else if (action === "task-finished" || action === "finish-task") {
+            } else if (event === "task-finished") {
               done();
-            } else if (action === "error" || msg.error) {
-              done(new Error(msg.message || msg.error || "CosyVoice unknown error"));
+            } else if (event === "task-failed" || msg.error) {
+              done(new Error(msg.header?.error_message || msg.message || msg.error || "CosyVoice unknown error"));
             }
           }
         } catch (e) {

@@ -113,26 +113,21 @@ async function startServer() {
       const { synthesizeReplyTts } = await import("../emotions/chatTtsHelper");
       const client = getEmotionsClient();
       const available = await client.isAvailable();
+      console.log(`[TTS] isAvailable=${available}, EMOTIONS_SYSTEM_ENABLED=${process.env.EMOTIONS_SYSTEM_ENABLED}`);
       if (available) {
         const { payload } = await synthesizeReplyTts(text.trim(), "frontend-tts");
+        console.log(`[TTS] synthesizeReplyTts status=${payload.status}, reason=${payload.reason}, segments=${payload.segments?.length}`);
         const seg = payload.segments?.[0];
         if (seg?.audioBase64) {
+          console.log(`[TTS] Success: audioBase64 length=${seg.audioBase64.length}`);
           res.json({ audio_base64: seg.audioBase64, format: seg.audioFormat || "wav" });
           return;
         }
-      }
-      // Fallback: 尝试本地 Piper
-      const localRes = await fetch("http://127.0.0.1:8001/api/local-tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.trim() }),
-      });
-      if (localRes.ok) {
-        const data = await localRes.json() as { audioBase64?: string };
-        res.json({ audio_base64: data.audioBase64 || "", format: "wav" });
+        // CosyVoice 合成失败时直接返回错误信息，不再 fallback 到本地 Piper
+        res.status(503).json({ error: payload.reason || "TTS synthesis returned no audio" });
         return;
       }
-      res.status(503).json({ error: "TTS service unavailable" });
+      res.status(503).json({ error: "TTS service unavailable: DASHSCOPE_API_KEY not configured" });
     } catch (err) {
       console.error("[TTS] /api/tts/synthesize error:", err);
       res.status(500).json({ error: String(err) });
