@@ -35,57 +35,87 @@ import { getSmartAgentApp } from "./agent/smartAgentApp";
  * - 其他内容：取第一句完整句（最多 200 字）
  */
 function extractSummary(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed) return "";
+  if (!text) return "";
 
-  // 策略1：短对话完整播报
-  if (trimmed.length <= 80 && !/^#{1,3}\s/.test(trimmed) && !/\|.*\|/.test(trimmed)) {
-    return trimmed;
+  let cleanText = text
+    // 移除思考过程，避免把内部推理内容送入 TTS。
+    .replace(/<think>[\s\S]*?<\/think>/g, "")
+    // 移除代码块、Markdown 表格与表格分隔线。
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/^\s*\|.*\|\s*$/gm, "")
+    .replace(/^\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+$/gm, "")
+    // Markdown 链接仅保留可读文本，不播报 URL。
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+
+  if (!cleanText) return "执行完毕，请查看详细结果。";
+
+  // 策略 A：如果回复中已经给出明确总结，只合成总结引导句，避免播报全文。
+  const summaryMatch = cleanText.match(/(总而言之|简单来说|综上所述|总结一下|整体来看|概括来说)[：:，,\s]*(.*?)(?=\n|$)/);
+  if (summaryMatch) {
+    const summary = `${summaryMatch[1]}，${summaryMatch[2] || ""}`.trim();
+    if (summary.length <= 100) return summary;
+    const truncated = summary.substring(0, 100);
+    const lastPunc = Math.max(
+      truncated.lastIndexOf("。"),
+      truncated.lastIndexOf("！"),
+      truncated.lastIndexOf("？"),
+      truncated.lastIndexOf("."),
+      truncated.lastIndexOf("!"),
+      truncated.lastIndexOf("?")
+    );
+    return lastPunc > 50 ? truncated.substring(0, lastPunc + 1) : `${truncated}……`;
   }
 
-  // 策略2：行程/表格类内容（包含高德表格或 generate_itinerary 结果）
-  if (/[#*]?\s*(第[一二两三四五六七1-7]天|日行程|景点|游览)/.test(trimmed) && /\|.*\|/.test(trimmed)) {
-    const dayMatch = trimmed.match(/(?:第 ?)?([一二两三四五六七1-7]) ?天/);
-    const destMatch = trimmed.match(/(?:北京|上海|深圳|广州|杭州|成都|重庆|西安|苏州|南京|武汉|长沙|青岛|天津|大连|厦门|昆明|桂林|三亚|哈尔滨|长春|沈阳|济南|郑州|石家庄|福州|南昌|合肥|太原|呼和浩特|乌鲁木齐|拉萨|西宁|兰州|银川|贵阳|南宁|海口|.*?)[一两二三四五六日天]/);
-    const dest = destMatch ? destMatch[0].match(/^[^\d\s,，]{2,6}/)?.[0] || "" : "";
-    const days = dayMatch ? dayMatch[1].replace(/[1-7]/, (m: string) => ["一","二","三","四","五","六","日"][parseInt(m) - 1]) : "多";
-    const sights = (trimmed.match(/🏛️|景点|游览/g) || []).length;
-    const stopMatch = trimmed.match(/景点[：:]\s*(\d+)/);
-    const stopCount = stopMatch ? stopMatch[1] : (sights > 0 ? String(sights) : "几");
+  // 策略 B：短对话保留完整播报，但跳过标题、表格、列表等结构化内容。
+  const isPlainShortReply =
+    cleanText.length <= 80 &&
+    !/^#{1,6}\s/m.test(cleanText) &&
+    !/^\s*(?:[-*+]|\d+[.)]|[一二三四五六七八九十]+[、.])\s+/m.test(cleanText);
+  if (isPlainShortReply) return cleanText;
 
-    const summary = dest
-      ? `${dest}${days}日行程规划已完成，共${stopCount}个景点。`
-      : `${days}日行程规划已完成，共${stopCount}个景点。`;
-    if (summary.length <= 200) return summary;
+  // 策略 C：取第一段有实质内容的自然语言；过滤标题、列表项、引用、表格残留等结构化文本。
+  const paragraphs = cleanText
+    .split(/\n+/)
+    .map((p) => p.replace(/^#{1,6}\s*/, "").trim())
+    .filter((p) => {
+      if (!p) return false;
+      if (/^\s*(?:[-*+]|\d+[.)]|[一二三四五六七八九十]+[、.])\s+/.test(p)) return false;
+      if (/^>\s*/.test(p)) return false;
+      if (/^\|.*\|$/.test(p)) return false;
+      if (/^[-=]{3,}$/.test(p)) return false;
+      return /[\u4e00-\u9fa5A-Za-z0-9]/.test(p);
+    });
+
+  if (paragraphs.length === 0) {
+    return "执行完毕，请查看详细结果。";
   }
 
-  // 策略3：天气数据类
-  if (/天气|温度|湿度|风力|空气质量/.test(trimmed) && /\d+°/.test(trimmed)) {
-    const cityMatch = trimmed.match(/([^\s，,]{2,6})(?:今天|今日|天气)/);
-    const tempMatch = trimmed.match(/(\d+)[-~到]\d+°?C?/);
-    const condMatch = trimmed.match(/(晴|阴|多云|雨|雪|雷阵雨|小雨|中雨|大雨|雾|霾|沙尘)/);
-    const city = cityMatch ? cityMatch[1] : "";
-    const temp = tempMatch ? tempMatch[0] : "";
-    const cond = condMatch ? condMatch[0] : "";
-    if (city && temp) {
-      const summary = `${city}今天${cond}，${temp}。`;
-      if (summary.length <= 200) return summary;
-    }
+  let summary = paragraphs[0];
+
+  // 如果第一段只是“好的”“已完成”等极短承接语，则拼接下一段核心内容。
+  if (summary.length < 10 && paragraphs.length > 1) {
+    summary = `${summary}，${paragraphs[1]}`;
   }
 
-  // 策略4：新闻/资讯类（提取第一段或第一句）
-  if (/最新消息|据.*报道|今日关注|资讯|新闻/.test(trimmed)) {
-    const firstPara = trimmed.split(/\n\n/)[0].replace(/[#*`~]/g, "").trim();
-    const match = firstPara.match(/^[^。！？.?!]{5,200}[。？！.?!]/);
-    if (match) return match[0].trim();
+  // 严格控制合成长度，优先在 100 字内完整断句，防止长列表/长分析进入 TTS。
+  if (summary.length > 100) {
+    const truncated = summary.substring(0, 100);
+    const lastPunc = Math.max(
+      truncated.lastIndexOf("。"),
+      truncated.lastIndexOf("！"),
+      truncated.lastIndexOf("？"),
+      truncated.lastIndexOf("."),
+      truncated.lastIndexOf("!"),
+      truncated.lastIndexOf("?")
+    );
+    summary = lastPunc > 50 ? truncated.substring(0, lastPunc + 1) : `${truncated}……`;
   }
 
-  // 策略5：默认取第一句（最多 200 字）
-  const match = trimmed.match(/^[^。！？.?!]{5,200}[。？！.?!]/);
-  if (match) return match[0].trim();
-  return trimmed.slice(0, 200);
+  return summary;
 }
-
 // ==================== 初始化 SmartAgentApp（单例，服务启动时初始化）====================
 let smartAgentReady = false;
 let smartAgentInitError: string | null = null;
