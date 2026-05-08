@@ -27,7 +27,15 @@ import type { ChatUiMessage } from "@shared/chatTts";
 import MemoryCards from "@/components/cockpit/MemoryCards";
 import { RealtimeAsrSession } from "@/lib/realtimeAsrStream";
 import { AiriStageContainer } from "@/components/airi-stage/AiriStageContainer";
-import { dispatchAssistantStageReply, notifyThinking, notifyIdle } from "@/lib/airi-stage";
+import { AiriStatusOverlay } from "@/components/airi-stage/AiriStatusOverlay";
+import {
+  dispatchAssistantStageReply,
+  notifyThinking,
+  notifyIdle,
+  notifyListening,
+  notifyTtsStart,
+  notifyTtsStop,
+} from "@/lib/airi-stage";
 import { useOmniMode, type UseOmniModeOptions } from "@/hooks/useOmniMode";
 
 // ==================== 文本噪声清理（Omni TTS 专用）====================
@@ -241,7 +249,20 @@ async function playBase64Audio(base64Data: string): Promise<void> {
       const src = ctx.createBufferSource();
       src.buffer = audioBuffer;
       src.connect(ctx.destination);
-      src.start();
+      notifyTtsStart(Math.max(0, audioBuffer.duration * 1000));
+      try {
+        await new Promise<void>((resolve, reject) => {
+          src.onended = () => resolve();
+          try {
+            src.start();
+          } catch (error) {
+            reject(error);
+          }
+        });
+      } finally {
+        notifyTtsStop();
+        void ctx.close().catch(() => {});
+      }
       return;
     }
 
@@ -255,7 +276,20 @@ async function playBase64Audio(base64Data: string): Promise<void> {
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(ctx.destination);
-    src.start();
+    notifyTtsStart(Math.max(0, buf.duration * 1000));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        src.onended = () => resolve();
+        try {
+          src.start();
+        } catch (error) {
+          reject(error);
+        }
+      });
+    } finally {
+      notifyTtsStop();
+      void ctx.close().catch(() => {});
+    }
   } catch (e) {
     console.warn("[LocalTTS] 播放失败:", e);
   }
@@ -448,7 +482,12 @@ export default function Cockpit() {
       if (result.tts?.segments?.[0]?.audioBase64) {
         const base64 = result.tts.segments[0].audioBase64;
         console.log(`[Cockpit] Omni TTS 摘要: "${result.summary}" → 播放音频`);
-        await audioMgr.playBase64Audio(base64);
+        notifyTtsStart();
+        try {
+          await audioMgr.playBase64Audio(base64);
+        } finally {
+          notifyTtsStop();
+        }
       } else {
         console.warn("[Cockpit] Omni TTS 返回为空，跳过播放");
       }
@@ -774,14 +813,17 @@ export default function Cockpit() {
         void asrSessionRef.current?.stop();
         asrSessionRef.current = null;
         setIsMicActive(false);
+        notifyIdle();
       },
       onDone: () => {
         asrSessionRef.current = null;
         setIsMicActive(false);
+        notifyIdle();
       },
     });
     asrSessionRef.current = session;
     setIsMicActive(true);
+    notifyListening();
     try {
       await session.start();
     } catch (e) {
@@ -789,6 +831,7 @@ export default function Cockpit() {
       toast.error(msg);
       asrSessionRef.current = null;
       setIsMicActive(false);
+      notifyIdle();
     }
   };
 
@@ -826,6 +869,7 @@ export default function Cockpit() {
             className="w-full h-full"
             viewMode="fullBody"
           />
+          <AiriStatusOverlay />
         </div>
       </div>
 
