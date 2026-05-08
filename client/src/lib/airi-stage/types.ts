@@ -106,9 +106,13 @@ export type StageEventMap = {
 
 /** 闲置子状态 */
 export type IdleState =
-  | "idle"       // 默认闲置（呼吸 + 眨眼）
-  | "thinking"   // AI 正在处理（歪头 / 手托下巴）
-  | "listening"; // 用户正在语音输入（微微前倾）
+  | "loading"      // 模型或舞台正在加载
+  | "idle"         // 默认闲置（呼吸 + 眨眼）
+  | "listening"    // 用户正在语音输入（侧耳倾听 + 身体前倾）
+  | "thinking"     // AI 正在处理（托腮思考）
+  | "tool_running" // 正在调用地图、音乐、办公、记忆等工具
+  | "success"      // 任务完成确认
+  | "error";       // 异常失败或需要重试
 
 // ==================== Live2D 参数映射 ====================
 

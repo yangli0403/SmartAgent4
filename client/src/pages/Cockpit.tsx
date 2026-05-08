@@ -31,6 +31,9 @@ import { AiriStatusOverlay } from "@/components/airi-stage/AiriStatusOverlay";
 import {
   dispatchAssistantStageReply,
   notifyThinking,
+  notifyToolRunning,
+  notifySuccess,
+  notifyError,
   notifyIdle,
   notifyListening,
   notifyTtsStart,
@@ -333,6 +336,7 @@ export default function Cockpit() {
           : m
       )
     );
+    if (supervisorStream.details.length > 0) notifyToolRunning();
   }, [activeRequestId, supervisorStream.details]);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -408,7 +412,7 @@ export default function Cockpit() {
       });
       setActiveRequestId(undefined);
       dispatchAssistantStageReply(data.response);
-      notifyIdle();
+      notifySuccess();
       utils.chat.listSessions.invalidate();
       void utils.memory.list.invalidate();
       if (data.persisted === false) {
@@ -434,7 +438,7 @@ export default function Cockpit() {
       console.warn("[Cockpit] tRPC 失败，切换到 Ark 直连模式:", error.message);
       setArkDirectMode(true);
       toast.info("已切换到 Ark LLM 直连模式");
-      notifyIdle();
+      notifyError();
     },
   });
 
@@ -450,7 +454,7 @@ export default function Cockpit() {
         { role: "assistant", content: cleaned },
       ]);
       dispatchAssistantStageReply(cleaned);
-      notifyIdle();
+      notifySuccess();
       if (isOmniMode && audioManager) {
         void synthesizeOmniSummary(cleaned, audioManager);
       } else {
@@ -458,7 +462,7 @@ export default function Cockpit() {
       }
     } catch (err: any) {
       toast.error("Ark LLM 调用失败: " + err.message);
-      notifyIdle();
+      notifyError();
     } finally {
       setArkSending(false);
     }
@@ -475,6 +479,7 @@ export default function Cockpit() {
     try {
       // 先清理噪声字符再合成
       const cleaned = cleanTextForTts(fullResponse);
+      notifyToolRunning();
       const result = await synthesizeOmniSummaryMutation.mutateAsync({
         fullResponse: cleaned,
         sessionId: currentSessionId ?? undefined,
@@ -493,6 +498,7 @@ export default function Cockpit() {
       }
     } catch (err) {
       console.error("[Cockpit] Omni TTS 合成失败:", err);
+      notifyError();
     }
   };
 
@@ -813,7 +819,7 @@ export default function Cockpit() {
         void asrSessionRef.current?.stop();
         asrSessionRef.current = null;
         setIsMicActive(false);
-        notifyIdle();
+        notifyError();
       },
       onDone: () => {
         asrSessionRef.current = null;
@@ -831,7 +837,7 @@ export default function Cockpit() {
       toast.error(msg);
       asrSessionRef.current = null;
       setIsMicActive(false);
-      notifyIdle();
+      notifyError();
     }
   };
 

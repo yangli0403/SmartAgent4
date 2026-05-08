@@ -11,10 +11,50 @@
  */
 
 import mitt from "mitt";
-import type { StageEventMap, StageEvent } from "./types";
+import type { StageEventMap, StageEvent, IdleState } from "./types";
+import { getAiriStatusPreset, type AiriStatusKey } from "./statusPresets";
 
 /** 全局舞台事件总线实例 */
 export const stageEventBus = mitt<StageEventMap>();
+
+let statusSequence = 0;
+
+/**
+ * 派发 AIRI 状态预设：统一驱动状态、表情和明显动作。
+ * speaking 由 TTS 口型状态承载，不写入 idle_state，避免打断原有状态机。
+ */
+export function notifyAiriStatus(status: AiriStatusKey): number {
+  const preset = getAiriStatusPreset(status);
+  const sequence = ++statusSequence;
+
+  if (status !== "speaking") {
+    stageEventBus.emit("idle_state", {
+      type: "idle_state",
+      state: status as IdleState,
+    });
+  }
+
+  stageEventBus.emit("expression", {
+    type: "expression",
+    expression: preset.expression,
+    intensity: status === "idle" ? 0.65 : 1.0,
+  });
+
+  stageEventBus.emit("motion", {
+    type: "motion",
+    motion: preset.motion,
+    priority: preset.priority,
+  });
+
+  return sequence;
+}
+
+function notifyTimedStatus(status: AiriStatusKey, autoResetMs = 1400): void {
+  const sequence = notifyAiriStatus(status);
+  globalThis.setTimeout(() => {
+    if (statusSequence === sequence) notifyIdle();
+  }, autoResetMs);
+}
 
 /**
  * 从 emotionParser 的解析结果中提取舞台事件并分发
@@ -86,36 +126,49 @@ export function dispatchStageEventsFromTags(
  * 通知舞台进入 thinking 状态（AI 正在处理）
  */
 export function notifyThinking(): void {
-  stageEventBus.emit("idle_state", {
-    type: "idle_state",
-    state: "thinking",
-  });
+  notifyAiriStatus("thinking");
 }
 
 /**
  * 通知舞台进入 listening 状态（用户正在语音输入）
  */
 export function notifyListening(): void {
-  stageEventBus.emit("idle_state", {
-    type: "idle_state",
-    state: "listening",
-  });
+  notifyAiriStatus("listening");
+}
+
+/**
+ * 通知舞台进入工具执行状态
+ */
+export function notifyToolRunning(): void {
+  notifyAiriStatus("tool_running");
+}
+
+/**
+ * 通知舞台进入任务完成确认状态，并短暂停留后回到 idle
+ */
+export function notifySuccess(autoResetMs = 1400): void {
+  notifyTimedStatus("success", autoResetMs);
+}
+
+/**
+ * 通知舞台进入异常失败状态，并短暂停留后回到 idle
+ */
+export function notifyError(autoResetMs = 1800): void {
+  notifyTimedStatus("error", autoResetMs);
 }
 
 /**
  * 通知舞台回到 idle 状态
  */
 export function notifyIdle(): void {
-  stageEventBus.emit("idle_state", {
-    type: "idle_state",
-    state: "idle",
-  });
+  notifyAiriStatus("idle");
 }
 
 /**
  * 通知舞台 TTS 开始播放
  */
 export function notifyTtsStart(durationMs?: number): void {
+  notifyAiriStatus("speaking");
   stageEventBus.emit("tts_start", {
     type: "tts_start",
     durationMs,
@@ -129,6 +182,7 @@ export function notifyTtsStop(): void {
   stageEventBus.emit("tts_stop", {
     type: "tts_stop",
   });
+  notifyIdle();
 }
 
 /**

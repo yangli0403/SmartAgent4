@@ -76,6 +76,50 @@ export const MOTION_MAPPING: MotionMappingConfig = {
     priority: 1,
   },
 
+  // ==================== 8 状态强反馈动作（语义别名，兼容当前 haru 模型动作组）====================
+
+  listen_ear_forward: {
+    name: "侧耳倾听",
+    group: "Tap",
+    index: 0,
+    priority: 4,
+  },
+
+  think_chin_touch: {
+    name: "托腮思考",
+    group: "Tap",
+    index: 0,
+    priority: 4,
+  },
+
+  operate_virtual_panel: {
+    name: "操作空中面板",
+    group: "Tap",
+    index: 1,
+    priority: 5,
+  },
+
+  explain_with_hand: {
+    name: "讲解手势",
+    group: "Tap",
+    index: 1,
+    priority: 5,
+  },
+
+  confirm_ok: {
+    name: "点头确认 / OK 手势",
+    group: "Tap",
+    index: 1,
+    priority: 4,
+  },
+
+  error_shrug: {
+    name: "摊手提示 / 轻微摇头",
+    group: "Tap",
+    index: 1,
+    priority: 5,
+  },
+
   // ==================== 闲置动作（映射到 Idle group）====================
 
   idle_breathe: {

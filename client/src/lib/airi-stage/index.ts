@@ -36,8 +36,12 @@ export { DEFAULT_STAGE_CONFIG } from "./types";
 export {
   stageEventBus,
   dispatchStageEventsFromTags,
+  notifyAiriStatus,
   notifyThinking,
   notifyListening,
+  notifyToolRunning,
+  notifySuccess,
+  notifyError,
   notifyIdle,
   notifyTtsStart,
   notifyTtsStop,
@@ -53,6 +57,8 @@ export type { StageHeuristicResult } from "./inferStageHeuristic";
 // 映射配置
 export { EXPRESSION_MAPPING, getExpressionParams } from "./expressionMapping";
 export { MOTION_MAPPING, getMotionDef } from "./motionMapping";
+export { AIRI_STATUS_PRESETS, getAiriStatusPreset } from "./statusPresets";
+export type { AiriStatusKey, AiriStatusPreset } from "./statusPresets";
 
 // 状态管理
 export { useStageStore } from "./useStageStore";
