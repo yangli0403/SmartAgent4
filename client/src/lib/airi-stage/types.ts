@@ -237,7 +237,7 @@ export interface AiriStageConfig {
 /** 默认舞台配置 */
 export const DEFAULT_STAGE_CONFIG: AiriStageConfig = {
   enabled: true,
-  modelUrl: "https://cdn.jsdelivr.net/gh/guansss/pixi-live2d-display/test/assets/haru/haru_greeter_t03.model3.json",
+  modelUrl: "/live2d/haru/haru_greeter_t03.model3.json",
   canvasWidth: 800,
   canvasHeight: 600,
   modelScale: 0.3,

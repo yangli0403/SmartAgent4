@@ -57,12 +57,28 @@
       ],
       "Tap": [
         {
-          "File": "motion/haru_g_m14.motion3.json",
-          "Sound": "../shizuku/sounds/flickHead_00.mp3"
+          "File": "motion/haru_g_m15.motion3.json",
+          "Sound": "sounds_cn/listen.wav"
         },
         {
           "File": "motion/haru_g_m05.motion3.json",
-          "Sound": "../shizuku/sounds/flickHead_01.mp3"
+          "Sound": "sounds_cn/think.wav"
+        },
+        {
+          "File": "motion/haru_g_m07.motion3.json",
+          "Sound": "sounds_cn/tool.wav"
+        },
+        {
+          "File": "motion/haru_g_m14.motion3.json",
+          "Sound": "sounds_cn/success.wav"
+        },
+        {
+          "File": "motion/haru_g_idle.motion3.json",
+          "Sound": "sounds_cn/error.wav"
+        },
+        {
+          "File": "motion/haru_g_m15.motion3.json",
+          "Sound": "sounds_cn/ack.wav"
         }
       ]
     }
