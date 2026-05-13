@@ -1,11 +1,11 @@
 {
   "airiServerUrl": "ws://localhost:6121/ws",
   "airiToken": "",
-  "autoConnect": true,
+  "autoConnect": false,
   "autoReconnect": true,
   "maxReconnectAttempts": -1,
   "enableEmotionRendering": true,
-  "enableTTS": true,
+  "enableTTS": false,
   "defaultCharacterId": "xiaozhi",
   "emotionMapping": {
     "neutral": {

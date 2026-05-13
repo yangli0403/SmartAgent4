@@ -144,7 +144,7 @@ export default function MemoryCards() {
       </div>
 
       {/* 记忆列表（可滚动区域） */}
-      <div className="flex-1 overflow-y-auto pr-0.5">
+      <div className="flex-1 overflow-y-auto scrollbar-none pr-0.5">
         {allMemories.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-xs text-white/30">

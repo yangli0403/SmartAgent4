@@ -138,6 +138,17 @@
   }
 }
 
+@layer utilities {
+  /* 隐藏滚动条但保留滚动功能（兼容所有浏览器） */
+  .scrollbar-none {
+    scrollbar-width: none;       /* Firefox */
+    -ms-overflow-style: none;    /* IE / Edge Legacy */
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;               /* Chrome, Safari, Opera, newer Edge */
+  }
+}
+
 @layer components {
   /**
    * Custom container utility that centers content and adds responsive padding.

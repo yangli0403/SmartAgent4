@@ -12,6 +12,76 @@
  * - 主结果返回时自动停止
  */
 
+// ==================== AIRI 出场音效 ====================
+
+/** AIRI 出场音效：首次登场时播放的中文问候语（独立于对话 TTS） */
+export async function playAiriAppearance(
+  /** 出场文案，可按需替换 */
+  greetingText = "你好，有什么可以帮你",
+  onStart?: () => void,
+  onEnd?: () => void
+): Promise<boolean> {
+  if (isPlaying) {
+    // 正在播放过渡音频，静默跳过
+    return false;
+  }
+  try {
+    const res = await fetch("http://127.0.0.1:8001/api/local-tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: greetingText }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json() as { audioBase64?: string };
+    if (!data.audioBase64) return false;
+
+    const ctx = new AudioContext();
+    if (ctx.state === "suspended") await ctx.resume();
+    const binary = atob(data.audioBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const isWav =
+      bytes.length >= 12 &&
+      bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes[8] === 0x57 && bytes[9] === 0x41 && bytes[10] === 0x56 && bytes[11] === 0x45;
+
+    let audioBuffer: AudioBuffer;
+    if (isWav) {
+      const wavBuffer = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength
+      );
+      audioBuffer = await ctx.decodeAudioData(wavBuffer.slice(0));
+    } else {
+      const fallbackSampleRate = 22050;
+      const int16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
+      const f32 = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768;
+      audioBuffer = ctx.createBuffer(1, f32.length, fallbackSampleRate);
+      audioBuffer.copyToChannel(f32, 0);
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = audioBuffer;
+    src.connect(ctx.destination);
+    const durationMs = Math.max(0, audioBuffer.duration * 1000);
+    onStart?.();
+
+    await new Promise<void>((resolve, reject) => {
+      src.onended = () => { onEnd?.(); resolve(); };
+      try { src.start(); } catch (e) { reject(e); }
+    });
+    await ctx.close();
+    console.log(`[AiriAppearance] 出场音效播放完成（${greetingText}，${Math.round(durationMs)}ms）`);
+    return true;
+  } catch (err) {
+    console.warn("[AiriAppearance] 出场音效播放失败:", err);
+    return false;
+  }
+}
+
+// ==================== 分类域过渡音频 ====================
+
 // 分类域 → 音频文件路径映射
 const INTERIM_AUDIO_MAP: Record<string, string[]> = {
   navigation: [
@@ -51,11 +121,39 @@ const INTERIM_AUDIO_MAP: Record<string, string[]> = {
   ],
 };
 
-// 音频缓存
+/**
+ * 在真正的音频 buffer 前插入静音 buffer，实现前导静音效果。
+ * @param ctx        AudioContext
+ * @param audioBuf   原始音频 buffer
+ * @param silenceSec 静音秒数
+ */
+function appendSilence(
+  ctx: AudioContext,
+  audioBuf: AudioBuffer,
+  silenceSec: number
+): AudioBuffer {
+  const sampleRate = audioBuf.sampleRate;
+  const silenceFrames = Math.round(sampleRate * silenceSec);
+  const silenceBuf = ctx.createBuffer(
+    audioBuf.numberOfChannels,
+    audioBuf.length + silenceFrames,
+    sampleRate
+  );
+  for (let c = 0; c < audioBuf.numberOfChannels; c++) {
+    silenceBuf.copyToChannel(audioBuf.getChannelData(c), c);
+  }
+  return silenceBuf;
+}
+
+// ==================== 音频缓存 ====================
+
 const audioCache = new Map<string, AudioBuffer>();
 let audioContext: AudioContext | null = null;
 let currentSource: AudioBufferSourceNode | null = null;
 let isPlaying = false;
+
+/** 前导静音秒数 */
+const LEADING_SILENCE_SEC = 1;
 
 /**
  * 获取或创建 AudioContext
@@ -80,8 +178,9 @@ export async function preloadInterimAudio(): Promise<void> {
       const response = await fetch(path);
       if (!response.ok) return;
       const arrayBuffer = await response.arrayBuffer();
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-      audioCache.set(path, audioBuffer);
+      const rawBuf = await ctx.decodeAudioData(arrayBuffer);
+      const silentBuf = appendSilence(ctx, rawBuf, LEADING_SILENCE_SEC);
+      audioCache.set(path, silentBuf);
     } catch (err) {
       console.warn(`[InterimAudio] Failed to preload: ${path}`, err);
     }
@@ -122,19 +221,20 @@ export async function playInterimAudio(
       await ctx.resume();
     }
 
-    // 尝试从缓存获取，否则实时加载
-    let audioBuffer = audioCache.get(audioPath);
-    if (!audioBuffer) {
+    // 如果缓存中已有原始音频，先补上静音再复用；未缓存的走下面的实时加载分支
+    let silentBuf = audioCache.get(audioPath);
+    if (!silentBuf) {
       const response = await fetch(audioPath);
       if (!response.ok) return false;
       const arrayBuffer = await response.arrayBuffer();
-      audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-      audioCache.set(audioPath, audioBuffer);
+      const rawBuf = await ctx.decodeAudioData(arrayBuffer);
+      silentBuf = appendSilence(ctx, rawBuf, LEADING_SILENCE_SEC);
+      audioCache.set(audioPath, silentBuf);
     }
 
     // 创建音频源并播放
     const source = ctx.createBufferSource();
-    source.buffer = audioBuffer;
+    source.buffer = silentBuf;
     source.connect(ctx.destination);
 
     source.onended = () => {
@@ -143,7 +243,8 @@ export async function playInterimAudio(
       onEnd?.();
     };
 
-    source.start(0);
+    const now = ctx.currentTime;
+    source.start(now);
     currentSource = source;
     isPlaying = true;
     onStart?.();

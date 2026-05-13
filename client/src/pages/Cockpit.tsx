@@ -38,7 +38,9 @@ import {
   notifyListening,
   notifyTtsStart,
   notifyTtsStop,
+  stageEventBus,
 } from "@/lib/airi-stage";
+import { playAiriAppearance } from "@/lib/interimAudioPlayer";
 import { useOmniMode, type UseOmniModeOptions } from "@/hooks/useOmniMode";
 
 // ==================== 文本噪声清理（Omni TTS 专用）====================
@@ -338,6 +340,23 @@ export default function Cockpit() {
     );
     if (supervisorStream.details.length > 0) notifyToolRunning();
   }, [activeRequestId, supervisorStream.details]);
+
+  // ==================== AIRI 出场音效（仅首次模型加载完成时播放）====================
+  const airiGreetingPlayed = useRef(false);
+  useEffect(() => {
+    const handler = () => {
+      if (airiGreetingPlayed.current) return;
+      airiGreetingPlayed.current = true;
+      void playAiriAppearance(
+        "你好，有什么可以帮你",
+        () => notifyTtsStart(2500),
+        () => notifyTtsStop()
+      );
+    };
+    stageEventBus.on("model_loaded", handler);
+    return () => { stageEventBus.off("model_loaded", handler); };
+  }, []);
+
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [isMicActive, setIsMicActive] = useState(false);
@@ -778,7 +797,7 @@ export default function Cockpit() {
   const adjustTextareaHeight = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const textarea = e.target;
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 150)}px`; // 最大高度 150px
+    textarea.style.height = `${textarea.scrollHeight}px`;
   };
 
   const handleNewSession = () => {
@@ -1036,7 +1055,7 @@ export default function Cockpit() {
 
         {/* Omni 实时转写/回复显示 */}
         {isOmniMode && (transcript || replyText) && (
-          <div className="bg-white/10 backdrop-blur-md rounded-xl border border-white/15 px-3 py-2 text-xs text-white/80 max-h-24 overflow-y-auto">
+          <div className="bg-white/10 backdrop-blur-md rounded-xl border border-white/15 px-3 py-2 text-xs text-white/80 max-h-24 overflow-y-auto scrollbar-none">
             {transcript && <p className="text-white/60"><span className="text-blue-300">我:</span> {transcript}</p>}
             {replyText && <p className="mt-1"><span className="text-purple-300">AI:</span> {replyText}</p>}
           </div>
@@ -1055,7 +1074,7 @@ export default function Cockpit() {
             placeholder="输入消息..."
             disabled={sendMessageMutation.isPending}
             rows={1}
-            className="flex-1 border-0 bg-transparent shadow-none focus-visible:ring-0 text-sm px-1 text-white placeholder:text-white/40 resize-none min-h-[32px] max-h-[150px] overflow-y-auto"
+            className="flex-1 border-0 bg-transparent shadow-none focus-visible:ring-0 text-sm px-1 text-white placeholder:text-white/40 resize-none min-h-[32px] overflow-hidden"
             style={{ height: "auto" }}
           />
           <Button
