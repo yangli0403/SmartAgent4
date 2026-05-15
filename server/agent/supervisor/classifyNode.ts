@@ -27,6 +27,10 @@ import {
 } from "../discovery";
 import type { IAgentCardRegistry } from "../discovery/types";
 import { appendGeneralAgentMemoryStepIfNeeded } from "./navigationMemoryPlan";
+import {
+  canShortCircuit,
+  correctIntent,
+} from "./intentSimilarity";
 
 /**
  * classifyNode �?LLM 系统提示词（静态降级版本）
@@ -395,6 +399,52 @@ export function refineClassificationForFollowUp(
     `[rule:follow_up_intent] 用户正在补充上一�?${prevDomain} 任务所需的信息�?{classification.reasoning || ""}`.trim();
 }
 
+// ==================== V4: 相似度纪偏 ====================
+
+/**
+ * 基于字符 N-gram + TF-IDF 余弦相似度的二次纪偏。
+ *
+ * 仅在以下两种场景跳过覆盖：
+ * 1. classification.domain === "cross_domain"：跨域任务交由 LLM/规划器决定
+ * 2. 其它规则纪偏函数已在 reasoning 中加了 [rule:xxx] 标记（可信度高）
+ *
+ * 调用点：在 LLM 返回并经过所有规则纪偏后，以“兜底式”身份运行。
+ */
+export function refineClassificationBySimilarity(
+  userText: string,
+  classification: TaskClassification
+): void {
+  const t = (userText || "").trim();
+  if (!t) return;
+
+  // 跨域任务不覆盖
+  if (classification.domain === "cross_domain") return;
+
+  // 如果规则纪偏已经介入，reasoning 会含 [rule:...]，低优先级于高置信度的规则纪偏
+  const ruleMarked = /\[rule:[a-z_]+\]/i.test(
+    classification.reasoning || ""
+  );
+  if (ruleMarked) return;
+
+  const result = correctIntent(t, classification.domain);
+  if (!result.shouldOverride) return;
+
+  const targetAgent = result.suggestedAgent;
+  if (!targetAgent) return;
+
+  console.log(
+    `[ClassifyNode] Similarity override: ${classification.domain} -> ${result.chosenDomain} ` +
+      `(reason=${result.reason}, top=${result.topScores
+        .map((s) => `${s.domain}:${s.score.toFixed(3)}`)
+        .join(",")})`
+  );
+
+  classification.domain = result.chosenDomain as TaskDomain;
+  classification.requiredAgents = [targetAgent];
+  classification.reasoning =
+    `[rule:similarity_${result.reason}] ${classification.reasoning || ""}`.trim();
+}
+
 // ==================== 对话上下文摘要构�?====================
 
 /**
@@ -495,6 +545,36 @@ export async function classifyNode(
   // 4. 获取动�?Prompt 并调�?LLM
   const classifyPrompt = getClassifyPrompt();
 
+  // V4 新增：在调用 LLM 之前，尝试基于相似度进行“短路”补充
+  // 仅在极高置信度命中时生效，避免误警。
+  const shortCircuit = canShortCircuit(userText);
+  if (shortCircuit.ok && shortCircuit.domain && shortCircuit.agent) {
+    console.log(
+      `[ClassifyNode] Short-circuit: domain=${shortCircuit.domain}, agent=${shortCircuit.agent}, top=${shortCircuit.topScores.map((s) => `${s.domain}:${s.score.toFixed(3)}`).join(",")}`
+    );
+    const shortClassification: TaskClassification = {
+      domain: shortCircuit.domain as TaskDomain,
+      complexity: "simple",
+      reasoning: `[rule:similarity_short_circuit] 相似度短路命中 top=${shortCircuit.topScores[0]?.score.toFixed(3)}`,
+      requiredAgents: [shortCircuit.agent],
+    };
+    let scPlan: PlanStep[] = [
+      {
+        id: 1,
+        description: userText,
+        targetAgent: shortCircuit.agent,
+        expectedTools: [],
+        dependsOn: [],
+        inputMapping: {},
+      },
+    ];
+    scPlan = appendGeneralAgentMemoryStepIfNeeded(state, scPlan);
+    return {
+      taskClassification: shortClassification,
+      plan: scPlan,
+    };
+  }
+
   try {
     // 优化：使用百炼平台轻量 LLM（qwen-turbo）进行意图分类，降低延迟
     const classification = await callLightLLMStructured<TaskClassification>(
@@ -527,6 +607,8 @@ export async function classifyNode(
     refineClassificationForNewsIntent(userText, classification);
     // V3 新增：follow-up 意图延续纠偏
     refineClassificationForFollowUp(userText, classification, messages);
+    // V4 新增：相似度二次纠偏（在所有规则纠偏之后兜底应用）
+    refineClassificationBySimilarity(userText, classification);
 
     // 验证 requiredAgents：确保引用的 Agent 在注册表中存�?
     if (
@@ -603,6 +685,8 @@ export async function classifyNode(
     refineClassificationForNewsIntent(userText, fallback);
     // V3 新增：降级时也应�?follow-up 纠偏
     refineClassificationForFollowUp(userText, fallback, messages);
+    // V4 新增：降级时也应用相似度纠偏
+    refineClassificationBySimilarity(userText, fallback);
 
     if (!fallback.requiredAgents || fallback.requiredAgents.length === 0) {
       fallback.requiredAgents = resolveAgentsForDomain(

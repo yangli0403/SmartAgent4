@@ -12,6 +12,7 @@ import {
   refineClassificationForDiskIntent,
   userMessageLooksLikeDirectoryInventoryIntent,
   refineClassificationForDirectoryInventoryIntent,
+  refineClassificationBySimilarity,
 } from "../classifyNode";
 import { AgentCardRegistry } from "../../discovery/agentCardRegistry";
 import type { AgentCard } from "../../discovery/types";
@@ -209,6 +210,76 @@ describe("ClassifyNode", () => {
       );
       expect(c.domain).toBe("file_system");
       expect(c.requiredAgents).toEqual(["fileAgent"]);
+    });
+  });
+
+  // ==================== V4: 相似度二次纠偏 ====================
+  describe("refineClassificationBySimilarity", () => {
+    it("“按我的喜好今晚适合听什么” 应由 navigation/multimedia 纠偏为 general", () => {
+      const c: TaskClassification = {
+        domain: "multimedia" as const,
+        complexity: "simple" as const,
+        reasoning: "",
+        requiredAgents: ["multimediaAgent"],
+      };
+      refineClassificationBySimilarity("按我的喜好，今晚适合听什么？", c);
+      expect(c.domain).toBe("general");
+      expect(c.requiredAgents).toEqual(["generalAgent"]);
+      expect(c.reasoning).toMatch(/\[rule:similarity_guard\]/);
+    });
+
+    it("明显的音乐请求如被误判为 general，应纠偏为 multimedia", () => {
+      const c: TaskClassification = {
+        domain: "general" as const,
+        complexity: "simple" as const,
+        reasoning: "",
+        requiredAgents: ["generalAgent"],
+      };
+      refineClassificationBySimilarity("播放周杰伦的歌", c);
+      expect(c.domain).toBe("multimedia");
+      expect(c.requiredAgents).toEqual(["multimediaAgent"]);
+    });
+
+    it("如果 reasoning 已含 [rule:xxx]，应跳过覆盖", () => {
+      const c: TaskClassification = {
+        domain: "file_system" as const,
+        complexity: "simple" as const,
+        reasoning: "[rule:disk_intent] 某高优先规则已纠偏",
+        requiredAgents: ["fileAgent"],
+      };
+      refineClassificationBySimilarity("分析一下 C 盘空间", c);
+      expect(c.domain).toBe("file_system");
+      expect(c.requiredAgents).toEqual(["fileAgent"]);
+    });
+
+    it("cross_domain 任务不应被覆盖", () => {
+      const c: TaskClassification = {
+        domain: "cross_domain" as const,
+        complexity: "complex" as const,
+        reasoning: "",
+        requiredAgents: ["navigationAgent", "multimediaAgent"],
+      };
+      refineClassificationBySimilarity("播放周杰伦的歌并规划路线", c);
+      expect(c.domain).toBe("cross_domain");
+      expect(c.requiredAgents).toEqual([
+        "navigationAgent",
+        "multimediaAgent",
+      ]);
+    });
+
+    it("明确的路线规划语句（无记忆引用）不应被错误覆盖为 general", () => {
+      const c: TaskClassification = {
+        domain: "navigation" as const,
+        complexity: "simple" as const,
+        reasoning: "",
+        requiredAgents: ["navigationAgent"],
+      };
+      refineClassificationBySimilarity(
+        "帮我规划从太湖软件园到上海虹桥机场的路线，途经山姆和苏州北站",
+        c
+      );
+      expect(c.domain).toBe("navigation");
+      expect(c.requiredAgents).toEqual(["navigationAgent"]);
     });
   });
 });
