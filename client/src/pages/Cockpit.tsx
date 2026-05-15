@@ -807,47 +807,74 @@ export default function Cockpit() {
     setMessages([]);
   };
 
+  /**
+   * 停止 ASR 并发送当前累积文本
+   * 复用于「手动点击麦克风」和「VAD 静音自动结束」两种场景
+   */
+  const stopMicAndSend = async () => {
+    if (!asrSessionRef.current) return;
+    const finalText = (asrCommittedRef.current + message).trim();
+    try {
+      await asrSessionRef.current.stop();
+    } finally {
+      asrSessionRef.current = null;
+      setIsMicActive(false);
+      asrCommittedRef.current = "";
+    }
+    if (finalText) {
+      doSend(finalText);
+    }
+  };
+
   const toggleMic = async () => {
     if (isMicActive) {
-      // ASR 结束后，收集最终文本并自动发送
-      const finalText = (asrCommittedRef.current + message).trim();
-      try {
-        await asrSessionRef.current?.stop();
-      } finally {
-        asrSessionRef.current = null;
-        setIsMicActive(false);
-        asrCommittedRef.current = "";
-      }
-      // ASR 结束 → 直接调用 doSend，不依赖 React state 异步更新
-      if (finalText) {
-        doSend(finalText);
-      }
+      // 手动点击 → 停止并发送
+      await stopMicAndSend();
       return;
     }
 
     asrCommittedRef.current = message;
-    const session = new RealtimeAsrSession({
-      onPartial: (text, sentenceEnd) => {
-        if (sentenceEnd) {
-          asrCommittedRef.current = (asrCommittedRef.current + text).trimEnd();
-          setMessage(asrCommittedRef.current);
-        } else {
-          setMessage(asrCommittedRef.current + text);
-        }
+    const session = new RealtimeAsrSession(
+      {
+        onPartial: (text, sentenceEnd) => {
+          if (sentenceEnd) {
+            asrCommittedRef.current = (asrCommittedRef.current + text).trimEnd();
+            setMessage(asrCommittedRef.current);
+          } else {
+            setMessage(asrCommittedRef.current + text);
+          }
+        },
+        onError: err => {
+          toast.error(err);
+          void asrSessionRef.current?.stop();
+          asrSessionRef.current = null;
+          setIsMicActive(false);
+          notifyError();
+        },
+        onDone: () => {
+          asrSessionRef.current = null;
+          setIsMicActive(false);
+          notifyIdle();
+        },
+        // ===== VAD：检测到持续静音 → 自动停止并发送 =====
+        onSilenceDetected: () => {
+          void stopMicAndSend();
+        },
+        onSpeechStateChange: speaking => {
+          if (speaking) {
+            notifyListening();
+          }
+        },
       },
-      onError: err => {
-        toast.error(err);
-        void asrSessionRef.current?.stop();
-        asrSessionRef.current = null;
-        setIsMicActive(false);
-        notifyError();
-      },
-      onDone: () => {
-        asrSessionRef.current = null;
-        setIsMicActive(false);
-        notifyIdle();
-      },
-    });
+      {
+        // VAD 配置：默认开启，能量阈值 0.015，静音 1.5s 后自动停止
+        enabled: true,
+        energyThreshold: 0.015,
+        silenceMs: 1500,
+        requireSpeechFirst: true,
+        maxRecordingMs: 30000,
+      }
+    );
     asrSessionRef.current = session;
     setIsMicActive(true);
     notifyListening();

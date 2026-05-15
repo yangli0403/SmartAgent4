@@ -1,10 +1,46 @@
 /**
  * 浏览器麦克风 → PCM 16k mono → WebSocket /api/asr/stream → 百炼流式识别
+ *
+ * v0.6 增强：
+ * - 内置 VAD（基于 RMS 能量阈值）
+ * - 检测到持续静音后自动触发 onSilenceDetected 回调
+ * - 上层组件可据此自动停止录音，无需手动点按
  */
 export type AsrStreamCallbacks = {
   onPartial: (text: string, sentenceEnd: boolean) => void;
   onError: (message: string) => void;
   onDone: () => void;
+  /**
+   * VAD 检测到「语音 → 持续静音」转换时触发
+   * 上层可据此调用 stop() 自动结束录音
+   */
+  onSilenceDetected?: () => void;
+  /**
+   * VAD 状态变化回调（可用于 UI 显示「正在说话/静音中」）
+   */
+  onSpeechStateChange?: (isSpeaking: boolean) => void;
+};
+
+/** VAD 配置 */
+export type VadOptions = {
+  /** 是否启用 VAD（默认 true） */
+  enabled?: boolean;
+  /** RMS 能量阈值，超过即视为语音（默认 0.015） */
+  energyThreshold?: number;
+  /** 触发自动停止所需的持续静音时长，单位 ms（默认 1500） */
+  silenceMs?: number;
+  /** 至少要先检测到一次语音后再判静音，避免开局误判（默认 true） */
+  requireSpeechFirst?: boolean;
+  /** 录音最大时长，单位 ms（默认 30000，即 30 秒，超时强制停止） */
+  maxRecordingMs?: number;
+};
+
+const DEFAULT_VAD: Required<VadOptions> = {
+  enabled: true,
+  energyThreshold: 0.015,
+  silenceMs: 1500,
+  requireSpeechFirst: true,
+  maxRecordingMs: 30000,
 };
 
 function downsampleFloat32(
@@ -36,6 +72,15 @@ function floatTo16BitPCM(float32: Float32Array): Uint8Array {
   return new Uint8Array(buffer);
 }
 
+/** 计算 PCM 帧的 RMS（均方根能量），返回 0~1 范围 */
+function computeRms(input: Float32Array): number {
+  let sumSq = 0;
+  for (let i = 0; i < input.length; i++) {
+    sumSq += input[i] * input[i];
+  }
+  return Math.sqrt(sumSq / input.length);
+}
+
 function getWsUrl(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}/api/asr/stream`;
@@ -48,15 +93,33 @@ export class RealtimeAsrSession {
   private mediaStream: MediaStream | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private readonly callbacks: AsrStreamCallbacks;
+  private readonly vadOptions: Required<VadOptions>;
 
-  constructor(callbacks: AsrStreamCallbacks) {
+  // VAD 状态
+  private isSpeaking = false;
+  private hasDetectedSpeech = false;
+  private lastSpeechAt = 0;
+  private silenceCheckTimer: number | null = null;
+  private maxRecordingTimer: number | null = null;
+  private silenceTriggered = false;
+  private startedAt = 0;
+
+  constructor(callbacks: AsrStreamCallbacks, vadOptions: VadOptions = {}) {
     this.callbacks = callbacks;
+    this.vadOptions = { ...DEFAULT_VAD, ...vadOptions };
   }
 
   async start(): Promise<void> {
     if (this.ws) {
       await this.stop();
     }
+
+    // 重置 VAD 状态
+    this.isSpeaking = false;
+    this.hasDetectedSpeech = false;
+    this.lastSpeechAt = 0;
+    this.silenceTriggered = false;
+    this.startedAt = Date.now();
 
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -131,17 +194,87 @@ export class RealtimeAsrSession {
     processor.onaudioprocess = e => {
       if (ws.readyState !== WebSocket.OPEN) return;
       const input = e.inputBuffer.getChannelData(0);
-      const down = downsampleFloat32(
-        input,
-        audioContext.sampleRate,
-        16000
-      );
+
+      // ===== VAD 能量检测 =====
+      if (this.vadOptions.enabled) {
+        this.processVad(input);
+      }
+
+      const down = downsampleFloat32(input, audioContext.sampleRate, 16000);
       const pcm = floatTo16BitPCM(down);
       ws.send(pcm.buffer);
     };
+
+    // 启动周期性静音检查（每 200ms 检查一次）
+    if (this.vadOptions.enabled) {
+      this.silenceCheckTimer = window.setInterval(() => {
+        this.checkSilence();
+      }, 200);
+
+      // 启动最大录音时长保护
+      this.maxRecordingTimer = window.setTimeout(() => {
+        if (!this.silenceTriggered && this.callbacks.onSilenceDetected) {
+          this.silenceTriggered = true;
+          this.callbacks.onSilenceDetected();
+        }
+      }, this.vadOptions.maxRecordingMs);
+    }
+  }
+
+  /** 处理一帧音频，更新 VAD 状态 */
+  private processVad(input: Float32Array): void {
+    const rms = computeRms(input);
+    const isSpeechFrame = rms > this.vadOptions.energyThreshold;
+
+    if (isSpeechFrame) {
+      this.lastSpeechAt = Date.now();
+      if (!this.hasDetectedSpeech) {
+        this.hasDetectedSpeech = true;
+      }
+      if (!this.isSpeaking) {
+        this.isSpeaking = true;
+        this.callbacks.onSpeechStateChange?.(true);
+      }
+    } else {
+      if (this.isSpeaking) {
+        // 触发静音状态变更（但不立即停止录音，等 silenceMs 后再判定）
+        this.isSpeaking = false;
+        this.callbacks.onSpeechStateChange?.(false);
+      }
+    }
+  }
+
+  /** 周期性检查是否需要因静音自动停止 */
+  private checkSilence(): void {
+    if (this.silenceTriggered) return;
+    if (!this.callbacks.onSilenceDetected) return;
+
+    // 必须先检测到过语音
+    if (this.vadOptions.requireSpeechFirst && !this.hasDetectedSpeech) {
+      return;
+    }
+
+    // 还没检测到任何语音帧，跳过
+    if (this.lastSpeechAt === 0) return;
+
+    const silenceDuration = Date.now() - this.lastSpeechAt;
+    if (silenceDuration >= this.vadOptions.silenceMs) {
+      this.silenceTriggered = true;
+      this.callbacks.onSilenceDetected();
+    }
   }
 
   async stop(): Promise<void> {
+    // 清除 VAD 定时器
+    if (this.silenceCheckTimer !== null) {
+      window.clearInterval(this.silenceCheckTimer);
+      this.silenceCheckTimer = null;
+    }
+    if (this.maxRecordingTimer !== null) {
+      window.clearTimeout(this.maxRecordingTimer);
+      this.maxRecordingTimer = null;
+    }
+
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       try {
         this.ws.send(JSON.stringify({ type: "end" }));
@@ -190,3 +323,13 @@ export class RealtimeAsrSession {
     }
   }
 }
+
+// ==================== 导出工具函数（用于测试） ====================
+
+/** 导出供单元测试使用 */
+export const __testing = {
+  computeRms,
+  downsampleFloat32,
+  floatTo16BitPCM,
+  DEFAULT_VAD,
+};
