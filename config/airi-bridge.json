@@ -5,7 +5,7 @@
   "autoReconnect": true,
   "maxReconnectAttempts": -1,
   "enableEmotionRendering": true,
-  "enableTTS": false,
+  "enableTTS": true,
   "defaultCharacterId": "xiaozhi",
   "emotionMapping": {
     "neutral": {
