@@ -23,11 +23,26 @@ const STAGE_TAG_TYPES = new Set([
 /**
  * 将一次助手完整回复映射到舞台：表情、动作、模拟朗读口型
  */
-export function dispatchAssistantStageReply(rawText: string): void {
+export type DispatchAssistantStageReplyOptions = {
+  /** 是否分发正文中提取/推断出的身体动作。TTS 未真正开始播放前应关闭，避免动作早于声音。 */
+  includeMotion?: boolean;
+  /** 是否启用无真实音频时的模拟口型。真实 TTS 链路应关闭，改由音频播放生命周期触发。 */
+  simulateSpeech?: boolean;
+};
+
+export function dispatchAssistantStageReply(
+  rawText: string,
+  options: DispatchAssistantStageReplyOptions = {}
+): void {
+  const includeMotion = options.includeMotion ?? true;
+  const simulateSpeech = options.simulateSpeech ?? true;
+
   cancelSimulatedSpeechLipsync();
 
   const parsed = parseEmotionTags(rawText);
-  const stageTags = parsed.tags.filter((tag) => STAGE_TAG_TYPES.has(tag.type));
+  const stageTags = parsed.tags.filter(
+    (tag) => tag.type === "expression" || (includeMotion && STAGE_TAG_TYPES.has(tag.type))
+  );
 
   if (stageTags.length > 0) {
     dispatchStageEventsFromTags(
@@ -40,7 +55,7 @@ export function dispatchAssistantStageReply(rawText: string): void {
       expression: h.expression,
       intensity: h.intensity,
     });
-    if (h.motion && getMotionDef(h.motion)) {
+    if (includeMotion && h.motion && getMotionDef(h.motion)) {
       stageEventBus.emit("motion", {
         type: "motion",
         motion: h.motion,
@@ -49,5 +64,7 @@ export function dispatchAssistantStageReply(rawText: string): void {
     }
   }
 
-  startSimulatedSpeechLipsync(parsed.cleanText.length);
+  if (simulateSpeech) {
+    startSimulatedSpeechLipsync(parsed.cleanText.length);
+  }
 }

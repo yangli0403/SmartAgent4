@@ -1,0 +1,27 @@
+=== 样例纠偏结果 ===
+query=按我的喜好，今晚适合吃什么、听什么？
+  llm=navigation suggested=general final=general override=True reason=guard
+  top= [('general', 0.3665), ('navigation', 0.0178), ('office', 0.0047)]
+query=你还记得我喜欢听谁的歌吗？
+  llm=multimedia suggested=general final=general override=True reason=guard
+  top= [('general', 0.3449), ('multimedia', 0.047), ('navigation', 0.0102)]
+query=昨晚的路线怎么走？
+  llm=navigation suggested=general final=general override=True reason=guard
+  top= [('general', 0.2015), ('navigation', 0.1278), ('multimedia', 0.0068)]
+query=帮我规划一下明天早上从苏州太湖软件园到上海虹桥机场的路线，中途经过山姆会员店和苏州北站。
+  llm=navigation suggested=navigation final=navigation override=False reason=similarity
+  top= [('navigation', 0.4461), ('general', 0.0689), ('office', 0.0199)]
+query=播放周杰伦的歌
+  llm=multimedia suggested=multimedia final=multimedia override=False reason=guard
+  top= [('multimedia', 0.3216), ('general', 0.0803), ('navigation', 0.0151)]
+query=帮我查附近的川菜馆怎么走
+  llm=navigation suggested=general final=navigation override=False reason=similarity
+  top= [('general', 0.1374), ('navigation', 0.1266), ('office', 0.0214)]
+query=以后少给我推荐太吵的活动，我更喜欢安静一点。
+  llm=general suggested=general final=general override=False reason=guard
+  top= [('general', 0.3685), ('navigation', 0.0283), ('multimedia', 0.0277)]
+
+=== 延迟基准 ===
+rounds=20000
+total_ms=1298.76
+avg_ms=0.0649

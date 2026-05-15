@@ -139,7 +139,19 @@ export class OmniAudioManager {
       const source = this.audioContext.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(this.audioContext.destination);
-      source.start();
+      this.audioBufferSource = source;
+      await new Promise<void>((resolve, reject) => {
+        source.onended = () => {
+          if (this.audioBufferSource === source) this.audioBufferSource = null;
+          resolve();
+        };
+        try {
+          source.start();
+        } catch (error) {
+          if (this.audioBufferSource === source) this.audioBufferSource = null;
+          reject(error);
+        }
+      });
     } catch (error) {
       console.error("[OmniAudio] Failed to play audio:", error);
     }
@@ -227,7 +239,19 @@ export class OmniAudioManager {
         const source = this.audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(this.audioContext.destination);
-        source.start();
+        this.audioBufferSource = source;
+        await new Promise<void>((resolve, reject) => {
+          source.onended = () => {
+            if (this.audioBufferSource === source) this.audioBufferSource = null;
+            resolve();
+          };
+          try {
+            source.start();
+          } catch (error) {
+            if (this.audioBufferSource === source) this.audioBufferSource = null;
+            reject(error);
+          }
+        });
         return;
       } else {
         // 直接当作 PCM

@@ -430,8 +430,8 @@ export default function Cockpit() {
         return [...next, { role: "assistant" as const, content: data.response }];
       });
       setActiveRequestId(undefined);
-      dispatchAssistantStageReply(data.response);
-      notifySuccess();
+      // 文本先展示，但只更新表情，不提前触发说话动作/模拟口型；真实说话动作由音频播放开始时的 notifyTtsStart 触发。
+      dispatchAssistantStageReply(data.response, { includeMotion: false, simulateSpeech: false });
       utils.chat.listSessions.invalidate();
       void utils.memory.list.invalidate();
       if (data.persisted === false) {
@@ -441,8 +441,10 @@ export default function Cockpit() {
       if (isOmniMode && audioManager) {
         void synthesizeOmniSummary(data.response, audioManager);
       } else if (!isOmniMode) {
-        // 非 Omni 模式（传统 ASR）：自动合成摘要 TTS 并播报
+        // 非 Omni 模式（传统 ASR）：自动合成摘要 TTS 并播报；等待音频真正开始时再触发说话动作。
         void playLocalTtsSummary(data.response);
+      } else {
+        notifySuccess();
       }
     },
     onError: (error) => {
@@ -472,8 +474,8 @@ export default function Cockpit() {
         ...prev,
         { role: "assistant", content: cleaned },
       ]);
-      dispatchAssistantStageReply(cleaned);
-      notifySuccess();
+      // Ark 直连也采用同样策略：文本先展示，只更新表情；真实说话动作等待音频播放生命周期触发。
+      dispatchAssistantStageReply(cleaned, { includeMotion: false, simulateSpeech: false });
       if (isOmniMode && audioManager) {
         void synthesizeOmniSummary(cleaned, audioManager);
       } else {
