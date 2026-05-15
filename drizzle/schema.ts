@@ -135,6 +135,39 @@ export const memories = pgTable(
       source?: string;
       relatedMemoryIds?: number[];
       tags?: string[];
+      // ----- Scene Episode 场景流程记忆扩展（0423） -----
+      /** 场景所属领域（与 Agent 领域对齐） */
+      domain?:
+        | "vehicle_control"
+        | "navigation"
+        | "multimedia"
+        | "smart_home"
+        | "office"
+        | "service"
+        | "general";
+      /** 场景名称，如“午睡模式”、“上班路线” */
+      sceneName?: string;
+      /** 召回该场景的触发词，用于补充索引与 BM25 医倍召回 */
+      triggerPhrases?: string[];
+      /** 时间规律，如 "weekday 12:00-14:00" */
+      timePattern?: string;
+      /** 场景下可执行的动作序列（车控、导航、媒体等场景同构） */
+      actions?: Array<{
+        /** 底层工具名，如 "vehicle.lights.off" 或 "maps_direction_driving" */
+        tool: string;
+        /** 动作诖义，如 "set"、"toggle"、"navigate" */
+        command: string;
+        /** 动作参数（不限制结构） */
+        args?: Record<string, unknown>;
+      }>;
+      /** 安全策略：是否需要在执行前让用户确认 */
+      safetyLevel?: "confirm_before_execute" | "auto_execute";
+      // 导航场景专用的结构化插槽（以便后续复用路线）
+      navOrigin?: string;
+      navDestination?: string;
+      navWaypoints?: string[];
+      /** 路线优先级：驾车 / 公交 / 步行等 */
+      navMode?: string;
     }>(),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     lastAccessedAt: timestamp("lastAccessedAt").defaultNow().notNull(),

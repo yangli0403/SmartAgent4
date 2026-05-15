@@ -51,6 +51,40 @@ async function memoryStoreImpl(args: Record<string, unknown>): Promise<string> {
   const confidence = Number(args.confidence ?? 0.8);
   const versionGroup = args.versionGroup as string | undefined;
 
+  // ----- Scene Episode 结构化入参（0423） -----
+  const sceneName = args.sceneName as string | undefined;
+  const sceneDomain = args.sceneDomain as
+    | "vehicle_control"
+    | "navigation"
+    | "multimedia"
+    | "smart_home"
+    | "office"
+    | "service"
+    | "general"
+    | undefined;
+  const triggerPhrases = args.triggerPhrases as string[] | undefined;
+  const timePattern = args.timePattern as string | undefined;
+  const safetyLevel = args.safetyLevel as
+    | "confirm_before_execute"
+    | "auto_execute"
+    | undefined;
+  const actions = args.actions as
+    | Array<{ tool: string; command: string; args?: Record<string, unknown> }>
+    | undefined;
+  const navOrigin = args.navOrigin as string | undefined;
+  const navDestination = args.navDestination as string | undefined;
+  const navWaypoints = args.navWaypoints as string[] | undefined;
+  const navMode = args.navMode as string | undefined;
+  const isSceneEpisode = Boolean(
+    sceneName ||
+      sceneDomain ||
+      triggerPhrases ||
+      actions ||
+      navOrigin ||
+      navDestination ||
+      navWaypoints
+  );
+
   // 参数校验
   if (!userId || userId <= 0) {
     return "错误：userId 无效，无法存储记忆。";
@@ -100,21 +134,59 @@ async function memoryStoreImpl(args: Record<string, unknown>): Promise<string> {
       }
     }
 
+    // 场景流程记忆：强制使用 episodic + behavior，并注入默认安全策略
+    const finalKind: "episodic" | "semantic" | "persona" = isSceneEpisode
+      ? "episodic"
+      : kind;
+    const finalType: "fact" | "behavior" | "preference" | "emotion" =
+      isSceneEpisode ? "behavior" : type;
+
+    let finalTags: string[] | null | undefined = tags || null;
+    if (isSceneEpisode && sceneDomain) {
+      const sceneTags = ["scene", `scene:${sceneDomain}`];
+      finalTags = Array.from(
+        new Set([...(tags ?? []), ...sceneTags])
+      );
+    }
+
+    const sceneMetadata: Record<string, unknown> | undefined = isSceneEpisode
+      ? {
+          source: "agent_skill",
+          tags: finalTags ?? undefined,
+          domain: sceneDomain,
+          sceneName,
+          triggerPhrases,
+          timePattern,
+          actions,
+          // 默认 confirm_before_execute，除非显式为 auto_execute
+          safetyLevel: safetyLevel ?? "confirm_before_execute",
+          navOrigin,
+          navDestination,
+          navWaypoints,
+          navMode,
+        }
+      : undefined;
+
     const memory: InsertMemory = {
       userId,
       content: content.trim(),
-      type,
-      kind,
+      type: finalType,
+      kind: finalKind,
       importance: Math.max(0, Math.min(1, importance)),
       confidence: Math.max(0, Math.min(1, confidence)),
-      tags: tags || null,
-      source: "agent_skill",
+      tags: finalTags ?? null,
+      source: isSceneEpisode ? "scene_episode" : "agent_skill",
       versionGroup: versionGroup || undefined,
-    };
+      ...(sceneMetadata ? { metadata: sceneMetadata } : {}),
+    } as InsertMemory;
 
     const result = await addMemory(memory);
     if (result) {
-      return `记忆存储成功。ID: ${result.id}, 类型: ${result.type}, 大类: ${result.kind}, 内容摘要: "${content.substring(0, 80)}${content.length > 80 ? "..." : ""}"`;
+      const sceneNote =
+        isSceneEpisode && sceneName
+          ? `（场景：${sceneName}，安全策略：${(sceneMetadata?.safetyLevel as string) ?? "confirm_before_execute"}）`
+          : "";
+      return `记忆存储成功。ID: ${result.id}, 类型: ${result.type}, 大类: ${result.kind}, 内容摘要: "${content.substring(0, 80)}${content.length > 80 ? "..." : ""}"${sceneNote}`;
     }
     return "记忆存储失败：数据库操作未返回结果，请稍后重试。";
   } catch (error) {
@@ -264,8 +336,9 @@ export function registerMemoryTools(registry: ToolRegistry): void {
       "主动存储一条结构化记忆。当你完成一个多轮任务（如导航规划、行程预订、复杂方案讨论）后，" +
       "必须调用此工具将本次任务的核心决策和关键信息总结为一条完整记忆。" +
       "输入参数：userId（用户ID）、content（记忆内容）、type（fact/behavior/preference/emotion）、" +
-      "kind（episodic/semantic/persona）、tags（标签数组，可选）、importance（重要度0-1，可选）、" +
-      "confidence（置信度0-1，可选）、versionGroup（版本分组，可选）。",
+      "kind（episodic/semantic/persona）、tags、importance、confidence、versionGroup。【场景流程记忆】车控（如午睡模式）、导航路线、剧本类场景请额外传入 " +
+      "sceneName、sceneDomain（vehicle_control/navigation/smart_home/multimedia/...）、actions（动作序列）、triggerPhrases、" +
+      "safetyLevel（车控/智能家默认 confirm_before_execute）。传入 sceneName 后系统会自动锁定为 episodic+behavior 并打上 scene 标签。",
     inputSchema: {
       type: "object",
       properties: {
@@ -300,9 +373,79 @@ export function registerMemoryTools(registry: ToolRegistry): void {
           type: "number",
           description: "置信度 (0.0 - 1.0)，默认 0.8（可选）",
         },
-        versionGroup: {
+                versionGroup: {
           type: "string",
           description: "版本分组标识，相同 versionGroup 的记忆会自动合并更新（可选）",
+        },
+        // ----- Scene Episode 场景流程记忆扩展字段（0423） -----
+        sceneName: {
+          type: "string",
+          description:
+            "场景名称，如“午睡模式”、“上班路线”。传入该字段将强制使用 episodic+behavior 作为记忆身份（可选）",
+        },
+        sceneDomain: {
+          type: "string",
+          enum: [
+            "vehicle_control",
+            "navigation",
+            "multimedia",
+            "smart_home",
+            "office",
+            "service",
+            "general",
+          ],
+          description:
+            "场景所属领域。如车控场景填 vehicle_control，导航路线填 navigation（可选）",
+        },
+        triggerPhrases: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "召回该场景的常见表达，如 [\"午睡模式”、\"昨天中午睡觉操作\"]（可选）",
+        },
+        timePattern: {
+          type: "string",
+          description: "时间规律，如 \"weekday 12:00-14:00\"（可选）",
+        },
+        actions: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              tool: { type: "string", description: "底层工具名" },
+              command: {
+                type: "string",
+                description: "动作语义，如 set / toggle / navigate",
+              },
+              args: { type: "object", description: "动作参数" },
+            },
+            required: ["tool", "command"],
+          },
+          description:
+            "场景下可执行的动作序列。车控例：[{tool:'vehicle.lights', command:'off'},{tool:'vehicle.ac', command:'set', args:{temperature:24}}]（可选）",
+        },
+        safetyLevel: {
+          type: "string",
+          enum: ["confirm_before_execute", "auto_execute"],
+          description:
+            "安全策略。车控类场景默认 confirm_before_execute；仅不可逆风险低的场景可设为 auto_execute（可选，默认 confirm_before_execute）",
+        },
+        navOrigin: {
+          type: "string",
+          description: "导航场景专用：起点（可选）",
+        },
+        navDestination: {
+          type: "string",
+          description: "导航场景专用：终点（可选）",
+        },
+        navWaypoints: {
+          type: "array",
+          items: { type: "string" },
+          description: "导航场景专用：途经点（可选）",
+        },
+        navMode: {
+          type: "string",
+          description: "导航场景专用：出行方式 driving / transit / walking（可选）",
         },
       },
       required: ["userId", "content", "type"],
@@ -311,7 +454,6 @@ export function registerMemoryTools(registry: ToolRegistry): void {
     category: "navigation" as const,
     registeredAt: new Date(),
   });
-
   // 2. memory_search — 主动检索记忆
   registry.register({
     name: "memory_search",
