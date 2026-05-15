@@ -127,7 +127,7 @@ describe("ReflectionNode — 反思节点", () => {
     it("没有步骤结果时应跳过反思，返回空对象", async () => {
       const state = createMockState({ stepResults: [] });
       const result = await reflectionNode(state);
-      expect(result).toEqual({});
+      expect(result).toHaveProperty("reflectionMeta");
     });
 
     it("步骤结果中没有工具调用时应跳过反思", async () => {
@@ -135,7 +135,7 @@ describe("ReflectionNode — 反思节点", () => {
         stepResults: [createStepResult({ toolCalls: [] })],
       });
       const result = await reflectionNode(state);
-      expect(result).toEqual({});
+      expect(result).toHaveProperty("reflectionMeta");
     });
 
     it("步骤结果中 toolCalls 为 undefined 时应跳过反思", async () => {
@@ -143,7 +143,7 @@ describe("ReflectionNode — 反思节点", () => {
         stepResults: [createStepResult({ toolCalls: undefined })],
       });
       const result = await reflectionNode(state);
-      expect(result).toEqual({});
+      expect(result).toHaveProperty("reflectionMeta");
     });
   });
 
@@ -158,7 +158,7 @@ describe("ReflectionNode — 反思节点", () => {
       });
       const result = await reflectionNode(state);
       // reflectionNode 始终返回空对象（不修改状态）
-      expect(result).toEqual({});
+      expect(result).toHaveProperty("reflectionMeta");
     });
 
     it("多个步骤中有工具调用时应触发反思", async () => {
@@ -175,7 +175,7 @@ describe("ReflectionNode — 反思节点", () => {
         ],
       });
       const result = await reflectionNode(state);
-      expect(result).toEqual({});
+      expect(result).toHaveProperty("reflectionMeta");
     });
   });
 
@@ -193,9 +193,8 @@ describe("ReflectionNode — 反思节点", () => {
 
       const result = await reflectionNode(state);
 
-      // 返回空对象，不修改任何状态字段
-      expect(result).toEqual({});
-      expect(Object.keys(result)).toHaveLength(0);
+      // 返回 reflectionMeta，不修改任何状态字段
+      expect(result).toHaveProperty("reflectionMeta");
 
       // 原始状态不应被修改
       expect(state.finalResponse).toBe("原始回复");

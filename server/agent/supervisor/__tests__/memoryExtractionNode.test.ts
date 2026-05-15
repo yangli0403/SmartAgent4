@@ -132,7 +132,7 @@ describe("MemoryExtractionNode", () => {
       const state = createMockState();
       const result = await memoryExtractionNode(state);
 
-      expect(result).toEqual({});
+      expect(result).toHaveProperty("memoryExtractionMeta");
     });
   });
 
@@ -175,7 +175,7 @@ describe("MemoryExtractionNode", () => {
       });
       const result = await memoryExtractionNode(state);
 
-      expect(result).toEqual({});
+      expect(result).toHaveProperty("memoryExtractionMeta");
       expect(mockAppendWorkingMemory).not.toHaveBeenCalled();
       expect(mockExtractMemoriesFromConversation).not.toHaveBeenCalled();
     });

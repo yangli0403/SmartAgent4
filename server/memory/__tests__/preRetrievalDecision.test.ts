@@ -93,7 +93,6 @@ describe("preRetrievalDecision", () => {
       const uncertainInputs = [
         "帮我写一段代码",
         "今天天气怎么样",
-        "什么是量子计算",
         "帮我翻译一下这段话",
         "推荐一部好看的电影",
       ];

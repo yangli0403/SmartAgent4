@@ -96,6 +96,8 @@ describe("US-4 publishEventsFromUpdates", () => {
       "step_finished",
       "step_started",
       "step_finished",
+      "responding",
+      "reflecting",
       "final",
     ]);
 

@@ -281,14 +281,12 @@ describe("backfillExtraction", () => {
         "../backfillExtraction"
       );
 
-      mockGetWorkingMemory.mockReturnValue({
-        messages: [
-          { role: "user", content: "我叫张三，住在北京" },
-          { role: "assistant", content: "好的，张三" },
-          { role: "user", content: "我喜欢吃火锅" },
-          { role: "assistant", content: "好的" },
-        ],
-      });
+      mockGetWorkingMemory.mockReturnValue([
+        { role: "user", content: "我叫张三，住在北京" },
+        { role: "assistant", content: "好的，张三" },
+        { role: "user", content: "我喜欢吃火锅" },
+        { role: "assistant", content: "好的" },
+      ]);
 
       mockCallLLMText.mockResolvedValue(
         JSON.stringify([
@@ -338,12 +336,10 @@ describe("backfillExtraction", () => {
         "../backfillExtraction"
       );
 
-      mockGetWorkingMemory.mockReturnValue({
-        messages: [
-          { role: "user", content: "我住在上海" },
-          { role: "assistant", content: "好的" },
-        ],
-      });
+      mockGetWorkingMemory.mockReturnValue([
+        { role: "user", content: "我住在上海" },
+        { role: "assistant", content: "好的" },
+      ]);
 
       mockCallLLMText.mockResolvedValue(
         JSON.stringify([
