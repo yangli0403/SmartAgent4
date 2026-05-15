@@ -1,22 +1,31 @@
 /**
- * ASR 模型与方言提示（language_hints）配置（v0.5 引入）
+ * ASR 模型与方言提示（language_hints）配置（v0.5 引入，v0.6 提升）
  *
  * 把模型选型与 run-task 报文构造从 asrStreamSocket.ts 中抽离，
  * 便于：
  * - 单元测试覆盖（不依赖真实 WebSocket）
- * - 后续切换到 qwen3-asr-flash 或其它多方言模型时只改一处
+ * - 后续切换不同模型族（paraformer / fun-asr / qwen-asr）只改一处
  *
- * 默认模型：paraformer-realtime-v2
- * - 阿里百炼实时识别"多方言版"，原生支持 16+ 种中文方言/口音
- * - 支持流式输入与 language_hints 参数
+ * 默认模型：fun-asr-realtime（v0.6 升级，更快、多方言覆盖更广）
+ * - 多方言覆盖：粵语、吴语、闽南语、客家话、赣语、湘语、晋语 + 中原/西南/净鲁/江淮等官话口音
+ * - 16kHz 采样，与原 paraformer 接口使用同一个 WebSocket 端点（wss://dashscope.aliyuncs.com/api-ws/v1/inference）
+ * - 价格 $0.000047/秒，比 paraformer-realtime-v2 更低
  *
  * 环境变量：
- * - DASHSCOPE_ASR_MODEL: 覆盖默认模型（如 qwen3-asr-flash / paraformer-realtime-8k-v2）
+ * - DASHSCOPE_ASR_MODEL: 覆盖默认模型
+ *   - 可选值：fun-asr-realtime / paraformer-realtime-v2 / paraformer-realtime-8k-v2 等
+ *   - 不可用值：qwen3-asr-flash（使用独立的 Qwen-ASR-Realtime API，需独立适配器）
  * - DASHSCOPE_ASR_LANGUAGE_HINTS: 逗号分隔的语种列表（如 "zh,yue,wuu,minnan,en"）
+ *   - 仅 paraformer 系列模型生效，fun-asr 系列自动检测语种，会自动跳过该参数
  */
 
-/** 默认 ASR 模型（多方言版） */
-export const DEFAULT_ASR_MODEL = "paraformer-realtime-v2";
+/** 默认 ASR 模型（v0.6 升级到 fun-asr-realtime） */
+export const DEFAULT_ASR_MODEL = "fun-asr-realtime";
+
+/** 检测模型是否为 fun-asr 系列（自动检测语种，不需要 language_hints） */
+function isFunAsrModel(model: string): boolean {
+  return /^fun-asr/i.test(model);
+}
 
 /** 默认方言/语种提示
  * - zh: 普通话（含主要北方口音）
@@ -50,7 +59,11 @@ export function resolveLanguageHints(): string[] {
     .filter((s) => s.length > 0);
 }
 
-/** 构造 DashScope run-task 报文（含 language_hints 参数） */
+/**
+ * 构造 DashScope run-task 报文
+ * - paraformer 系列：携带 language_hints 参数提高多方言准确率
+ * - fun-asr 系列：自动识别语种，不携带 language_hints 避免参数不兼容
+ */
 export function buildAsrRunTaskPayload(
   taskId: string,
   model: string,
@@ -65,11 +78,25 @@ export function buildAsrRunTaskPayload(
     parameters: {
       sample_rate: number;
       format: "pcm";
-      language_hints: string[];
+      language_hints?: string[];
     };
     input: Record<string, never>;
   };
 } {
+  const parameters: {
+    sample_rate: number;
+    format: "pcm";
+    language_hints?: string[];
+  } = {
+    sample_rate: 16000,
+    format: "pcm",
+  };
+
+  // fun-asr 系列自动检测语种，不需要 language_hints
+  if (!isFunAsrModel(model) && languageHints.length > 0) {
+    parameters.language_hints = languageHints;
+  }
+
   return {
     header: {
       action: "run-task",
@@ -81,11 +108,7 @@ export function buildAsrRunTaskPayload(
       task: "asr",
       function: "recognition",
       model,
-      parameters: {
-        sample_rate: 16000,
-        format: "pcm",
-        language_hints: languageHints,
-      },
+      parameters,
       input: {},
     },
   };
