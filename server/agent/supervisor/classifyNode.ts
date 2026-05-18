@@ -200,15 +200,14 @@ export function refineClassificationForNewsIntent(
     /热搜|热榜|今日热搜/.test(t);
 
   if (looksNews) {
+    const agents = classification.requiredAgents ?? [];
     const wrongAgent =
-      classification.domain === "office" ||
-      classification.domain === "navigation" ||
-      (classification.requiredAgents?.includes("officeAgent") ?? false) ||
-      (classification.requiredAgents?.includes("navigationAgent") ?? false);
+      classification.domain !== "general" ||
+      (agents.length > 0 && !agents.includes("generalAgent"));
 
     if (wrongAgent) {
       console.log(
-        `[ClassifyNode] Rule override: news intent detected (was ${classification.domain}), forcing �?general + generalAgent`
+        `[ClassifyNode] Rule override: news intent detected (was ${classification.domain}), forcing general + generalAgent`
       );
       classification.domain = "general";
       classification.complexity = "simple";

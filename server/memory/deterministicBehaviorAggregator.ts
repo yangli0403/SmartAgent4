@@ -42,16 +42,23 @@ export async function recordDeterministicActionPatterns(
   if (!userId || userId <= 0 || result.status !== "success") return;
 
   const toolCalls = normalizeToolCalls(result.toolCalls);
-  if (toolCalls.length === 0) return;
+  let domain: SceneDomain | null = null;
+  let actions: SceneAction[] = [];
 
-  const domain = inferSceneDomain(step.targetAgent, toolCalls, userText);
-  if (!domain) return;
+  if (toolCalls.length > 0) {
+    domain = inferSceneDomain(step.targetAgent, toolCalls, userText);
+    if (!domain) return;
 
-  const actions = toolCalls
-    .filter((call) => call.status !== "error")
-    .map(toolCallToSceneAction)
-    .filter((a): a is SceneAction => Boolean(a));
-  if (actions.length === 0) return;
+    actions = toolCalls
+      .filter((call) => call.status !== "error")
+      .map(toolCallToSceneAction)
+      .filter((a): a is SceneAction => Boolean(a));
+  } else {
+    actions = inferTextOnlyVehicleActions(userText);
+    domain = actions.length > 0 ? "vehicle_control" : null;
+  }
+
+  if (!domain || actions.length === 0) return;
 
   const signature = buildActionSignature(domain, actions);
   const patternType = `det:${domain}:${hashSignature(signature)}`;
@@ -122,6 +129,70 @@ export async function recordDeterministicActionPatterns(
 function normalizeToolCalls(toolCalls: StepResult["toolCalls"]): ToolCallRecord[] {
   if (!Array.isArray(toolCalls)) return [];
   return toolCalls as ToolCallRecord[];
+}
+
+function inferTextOnlyVehicleActions(userText: string): SceneAction[] {
+  const t = userText.trim();
+  if (!t) return [];
+
+  const mentionsVehicleControl =
+    /(空调|温度调|调到\d{1,2}\s*度|车灯|大灯|灯光|白噪音|座椅|车窗|天窗)/.test(t);
+  const hasActionVerb =
+    /(打开|开启|关闭|调到|调至|调整|调高|调低|增加|降低|播放|来点|来一点|放点|放一点)/.test(t);
+  if (!mentionsVehicleControl || !hasActionVerb) return [];
+
+  const actions: SceneAction[] = [];
+  const temperatureMatch = t.match(/(?:温度)?(?:调到|调至|设置为|设为)\s*(\d{1,2})\s*度?/);
+
+  if (/空调/.test(t) || temperatureMatch) {
+    const args: Record<string, unknown> = {};
+    if (/(打开|开启).{0,6}空调|空调.{0,6}(打开|开启)/.test(t)) args.enabled = true;
+    if (/(关闭|关掉).{0,6}空调|空调.{0,6}(关闭|关掉)/.test(t)) args.enabled = false;
+    if (temperatureMatch) args.temperatureCelsius = Number(temperatureMatch[1]);
+    actions.push({
+      tool: "text_vehicle_ac",
+      command: temperatureMatch ? "set" : args.enabled === false ? "off" : "on",
+      args: Object.keys(args).length > 0 ? args : undefined,
+    });
+  }
+
+  if (/(车灯|大灯|灯光)/.test(t)) {
+    const args: Record<string, unknown> = {};
+    if (/车外大灯|外部灯|车外灯/.test(t)) args.target = "exterior";
+    if (/车内灯|阅读灯|氛围灯/.test(t)) args.target = "interior";
+    const off = /(关闭|关掉).{0,8}(车灯|大灯|灯光)|(?:车灯|大灯|灯光).{0,8}(关闭|关掉)/.test(t);
+    const on = /(打开|开启).{0,8}(车灯|大灯|灯光)|(?:车灯|大灯|灯光).{0,8}(打开|开启)/.test(t);
+    actions.push({
+      tool: "text_vehicle_lights",
+      command: off ? "off" : on ? "on" : "set",
+      args: Object.keys(args).length > 0 ? args : undefined,
+    });
+  }
+
+  if (/白噪音/.test(t)) {
+    const args: Record<string, unknown> = {};
+    if (/(增加|调高|大一点|提高)/.test(t)) args.level = "increase";
+    if (/(降低|调低|小一点|减少)/.test(t)) args.level = "decrease";
+    const off = /(关闭|关掉|停止).{0,8}白噪音|白噪音.{0,8}(关闭|关掉|停止)/.test(t);
+    actions.push({
+      tool: "text_vehicle_white_noise",
+      command: off ? "off" : "on",
+      args: Object.keys(args).length > 0 ? args : undefined,
+    });
+  }
+
+  if (/座椅/.test(t)) {
+    actions.push({ tool: "text_vehicle_seat", command: "set" });
+  }
+  if (/(车窗|天窗)/.test(t)) {
+    const off = /(关闭|关掉).{0,8}(车窗|天窗)|(?:车窗|天窗).{0,8}(关闭|关掉)/.test(t);
+    actions.push({
+      tool: /天窗/.test(t) ? "text_vehicle_sunroof" : "text_vehicle_window",
+      command: off ? "off" : "on",
+    });
+  }
+
+  return actions;
 }
 
 function inferSceneDomain(

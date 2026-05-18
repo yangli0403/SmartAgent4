@@ -76,6 +76,16 @@ export const DEFAULT_CANDIDATES: IntentCandidate[] = [
       "以后别推荐太吵的活动",
       "昨晚那条路线帮我再说一遍",
       "上次说的路线怎么走",
+      "看新闻",
+      "最新新闻",
+      "今日新闻",
+      "科技新闻",
+      "新闻资讯",
+      "热点头条",
+      "今天有什么新闻",
+      "给我推送新闻",
+      "搜索新闻",
+      "查一下新闻",
     ],
   },
   {
@@ -154,6 +164,14 @@ export const MEMORY_GUARD_PATTERNS: RegExp[] = [
   /(昨晚|昨天|上次|之前|以前).{0,12}(路线|怎么走|怎么去)|那条路线/,
   /按我的|根据我的|我的(喜好|偏好|习惯)|适合我的/,
   /以后.*(少|别|不要)|记住|更新.*偏好/,
+];
+/**
+ * 新闻/资讯类正则：命中后倾向 general 域，避免“搜索新闻”等请求被音乐/多媒体短路规则或字符相似度误导。
+ */
+export const NEWS_GUARD_PATTERNS: RegExp[] = [
+  /新闻|资讯|头条|日报|早报|晚报|热点|时事|热搜|热榜/,
+  /(?:推送|发送|发送给我|给我发|搜索|搜|查|找).{0,12}(?:新闻|资讯|热点|头条)/,
+  /(?:今天|今日|早上|每天).{0,12}(?:新闻|资讯|热点|头条|推送)/,
 ];
 /**
  * 显式导航类正则：命中后允许 navigation 域优先。
@@ -299,11 +317,15 @@ function cosine(
  * 高置信度规则前置拦截：返回锁定的 domain，或 null 表示未命中。
  *
  * 行为约定：
+ * - 命中 NEWS_GUARD：一律收敛为 general
  * - 命中 MEMORY_GUARD：除非是显式规划路线（NAV_EXPLICIT 命中且无记忆引用），
  *   一律收敛为 general
  * - 命中 MUSIC_ACTION：收敛为 multimedia
  */
 export function guardDomain(query: string): string | null {
+  if (NEWS_GUARD_PATTERNS.some((p) => p.test(query))) {
+    return "general";
+  }
   if (MEMORY_GUARD_PATTERNS.some((p) => p.test(query))) {
     const explicitNav = NAV_EXPLICIT_PATTERNS.some((p) => p.test(query));
     const memoryRef = /(昨晚|上次|之前|记得|说过|那条)/.test(query);
