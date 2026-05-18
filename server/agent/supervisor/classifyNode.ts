@@ -156,6 +156,34 @@ export function userMessageLooksLikeDiskIntent(userText: string): boolean {
  * 新闻/资讯查询类请求若被误判为 navigation/office 等，会导致走�?Agent（无新闻工具），
  * 模型无法调用 get_latest_news。出结果前强�?general + generalAgent�?
  */
+/**
+ * 天气查询类请求强制路由到 navigationAgent。
+ * 防止 LLM 将「苏州天气」「今天天气怎么样」等误判为 general。
+ */
+export function refineClassificationForWeatherIntent(
+  userText: string,
+  classification: TaskClassification
+): void {
+  const t = userText.trim();
+  if (!t) return;
+  // 天气类关键词
+  const looksWeather =
+    /天气|气温|温度|下雨|晴天|阴天|雨天|风速|湿度|预报|几度|冷不冷|热不热/.test(t) ||
+    /(?:今天|明天|后天|本周|这周|周末).{0,8}(?:天气|气温|温度|下雨|晴)/.test(t) ||
+    /(?:天气|气温).{0,8}(?:怎么样|如何|好不好|咋样)/.test(t);
+  if (!looksWeather) return;
+  // 如果已经是 navigation，不覆盖
+  if (classification.domain === "navigation" &&
+      (classification.requiredAgents?.includes("navigationAgent") ?? false)) return;
+  console.log(
+    `[ClassifyNode] Rule override: weather intent detected (was ${classification.domain}), forcing → navigation + navigationAgent`
+  );
+  classification.domain = "navigation";
+  classification.complexity = "simple";
+  classification.requiredAgents = ["navigationAgent"];
+  classification.reasoning =
+    `[rule:weather_intent] ${classification.reasoning || ""}`.trim();
+}
 export function refineClassificationForNewsIntent(
   userText: string,
   classification: TaskClassification
@@ -343,10 +371,19 @@ function looksLikeSupplementaryInfo(userText: string): boolean {
     t.length < 30 &&
     !/(?:帮我|请|查|搜|找|发|建|创建|规划|导航|播放|推荐|分析|打开)/.test(t)
   ) {
-    // 但要排除纯闲聊（你好、谢谢等�?
-    if (!/^(?:你好|谢谢|好的|嗯|哦|再见|拜拜|ok|OK)/.test(t)) {
-      return true;
+    // 排除纯闲聊（你好、谢谢等）
+    if (/^(?:你好|谢谢|好的|嗯|哦|再见|拜拜|ok|OK)/.test(t)) {
+      return false;
     }
+    // 排除偏好/习惯/身份陈述（"我喜欢…""我是…""喜欢听…"等），这类应交给 generalAgent 记忆
+    if (/(?:喜欢|不喜欢|偏好|爱好|习惯|我是|我叫|我在|我有|我想|我需要|我希望)/.test(t)) {
+      return false;
+    }
+    // 排除包含"新闻/资讯/内容/信息"的陈述，这类是偏好表达而非补充信息
+    if (/(?:新闻|资讯|内容|信息|节目|视频|文章)/.test(t)) {
+      return false;
+    }
+    return true;
   }
 
   return false;
@@ -455,7 +492,7 @@ export function refineClassificationBySimilarity(
  */
 function buildRecentConversationSummary(
   messages: readonly import("@langchain/core/messages").BaseMessage[],
-  maxTurns: number = 3
+  maxTurns: number = 1
 ): string {
   if (messages.length <= 1) return "";
 
@@ -605,6 +642,8 @@ export async function classifyNode(
     refineClassificationForDirectoryInventoryIntent(userText, classification);
     // V3 新增：新闻意图纠�?
     refineClassificationForNewsIntent(userText, classification);
+    // V4 新增：天气查询强制路由到 navigationAgent
+    refineClassificationForWeatherIntent(userText, classification);
     // V3 新增：follow-up 意图延续纠偏
     refineClassificationForFollowUp(userText, classification, messages);
     // V4 新增：相似度二次纠偏（在所有规则纠偏之后兜底应用）
@@ -683,6 +722,8 @@ export async function classifyNode(
     refineClassificationForDirectoryInventoryIntent(userText, fallback);
     // V3 新增：新闻意图纠�?
     refineClassificationForNewsIntent(userText, fallback);
+    // 天气查询强制路由
+    refineClassificationForWeatherIntent(userText, fallback);
     // V3 新增：降级时也应�?follow-up 纠偏
     refineClassificationForFollowUp(userText, fallback, messages);
     // V4 新增：降级时也应用相似度纠偏

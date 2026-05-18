@@ -65,6 +65,12 @@ export class ServiceAgent extends BaseAgent {
       prompt += `\n当前时间: ${context.currentTime}`;
     }
 
+    // 注入用户召回记忆（偏好、习惯等），确保推荐时参考用户喜好
+    const memories = context?.retrievedMemories as string[] | undefined;
+    if (memories && memories.length > 0) {
+      prompt += `\n\n## 用户记忆（请在推荐时优先参考）\n${memories.join("\n")}`;
+    }
+
     return prompt;
   }
 

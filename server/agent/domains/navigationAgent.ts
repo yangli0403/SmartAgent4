@@ -157,6 +157,12 @@ export class NavigationAgent extends BaseAgent {
         `\n会话槽位（城市/起终点/途经点）已注入任务消息；POI 与路径检索须与槽位一致，勿改用其他城市。`;
     }
 
+    // 注入用户召回记忆（偏好路线、常去地点等）
+    const memories = context?.retrievedMemories as string[] | undefined;
+    if (memories && memories.length > 0) {
+      prompt += `\n\n## 用户记忆（请在路线规划和地点推荐时参考）\n${memories.join("\n")}`;
+    }
+
     return prompt;
   }
 

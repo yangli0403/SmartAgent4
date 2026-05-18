@@ -24,7 +24,8 @@ export type SupervisorEventType =
   | "reflected"
   | "memory_extracted"
   | "final"
-  | "error";
+  | "error"
+  | "proactive_suggest";
 
 /** 标准事件信封（SSE / 进程内 EventBus 共用） */
 export interface SupervisorEventEnvelope<P = unknown> {
@@ -118,6 +119,20 @@ export interface MemoryExtractedPayload {
   behaviorDetectionTriggered: boolean;
   /** 自动提取得到的新记忆条数（自动提取关闭时为 0） */
   extractedCount: number;
+}
+
+/** 主动建议事件载荷（重复操作检测触发） */
+export interface ProactiveSuggestPayload {
+  /** 检测到的行为模式描述 */
+  patternDescription: string;
+  /** 行为模式类型 */
+  patternType: string;
+  /** 已检测到的频率（次数） */
+  frequency: number;
+  /** 建议的场景名称 */
+  suggestedSceneName: string;
+  /** 建议的操作步骤列表 */
+  suggestedSteps: string[];
 }
 
 // ==================== 工具：构造默认信封 ====================

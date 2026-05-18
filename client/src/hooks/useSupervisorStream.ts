@@ -27,10 +27,20 @@ export type SupervisorStreamStatus =
   | "completed"
   | "failed";
 
+export interface ProactiveSuggestion {
+  patternDescription: string;
+  patternType: string;
+  frequency: number;
+  suggestedSceneName: string;
+  suggestedSteps: string[];
+  requestId: string;
+}
+
 export interface SupervisorStreamState {
   status: SupervisorStreamStatus;
   details: ChatThinkingDetail[];
   finalResponse?: string;
+  proactiveSuggestion?: ProactiveSuggestion;
 }
 
 const NON_DETAIL_EVENTS: SupervisorEventType[] = ["connected" as never];
@@ -90,10 +100,8 @@ export function useSupervisorStream(
         if (env.type === "classified") {
           const payload = (env as { payload?: { domain?: string; complexity?: string } }).payload;
           const domain = payload?.domain || "general";
-          // 仅对非 simple 任务播放过渡音频（simple 任务响应很快，不需要过渡）
-          if (payload?.complexity !== "simple") {
-            playInterimAudio(domain).catch(() => {});
-          }
+          // 所有任务均播放过渡音频（simple 任务虽快，但天气/导航等仍需等待工具调用）
+          playInterimAudio(domain).catch(() => {});
         }
       } catch {
         // ignore malformed
@@ -124,6 +132,35 @@ export function useSupervisorStream(
       es.close();
     };
 
+    // 处理主动建议事件
+    const onProactiveSuggest = (ev: MessageEvent) => {
+      try {
+        const env = JSON.parse(ev.data) as SupervisorEventEnvelope;
+        const payload = (env as { payload?: {
+          patternDescription?: string;
+          patternType?: string;
+          frequency?: number;
+          suggestedSceneName?: string;
+          suggestedSteps?: string[];
+        } }).payload;
+        if (payload?.suggestedSceneName) {
+          setState((prev) => ({
+            ...prev,
+            proactiveSuggestion: {
+              patternDescription: payload.patternDescription || "",
+              patternType: payload.patternType || "",
+              frequency: payload.frequency || 3,
+              suggestedSceneName: payload.suggestedSceneName,
+              suggestedSteps: payload.suggestedSteps || [],
+              requestId: env.requestId,
+            },
+          }));
+        }
+      } catch {
+        // ignore
+      }
+    };
+
     const eventNames: SupervisorEventType[] = [
       "classified",
       "memory_recalled",
@@ -133,12 +170,14 @@ export function useSupervisorStream(
       "replan",
       "reflected",
       "memory_extracted",
+      "proactive_suggest",
       "error",
     ];
 
     es.addEventListener("connected", onConnected as EventListener);
     es.addEventListener("final", onFinal as EventListener);
     es.addEventListener("error", onError as EventListener);
+    es.addEventListener("proactive_suggest", onProactiveSuggest as EventListener);
     eventNames.forEach((name) =>
       es.addEventListener(name, onAny as EventListener)
     );
@@ -150,6 +189,7 @@ export function useSupervisorStream(
       es.removeEventListener("connected", onConnected as EventListener);
       es.removeEventListener("final", onFinal as EventListener);
       es.removeEventListener("error", onError as EventListener);
+      es.removeEventListener("proactive_suggest", onProactiveSuggest as EventListener);
       es.close();
       esRef.current = null;
     };

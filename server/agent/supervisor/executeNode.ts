@@ -26,7 +26,7 @@ export function createExecuteNode(agentRegistry: AgentRegistry) {
   return async function executeNode(
     state: SupervisorStateType
   ): Promise<Partial<SupervisorStateType>> {
-    const { plan, currentStepIndex, stepResults, messages, context, dialogueSlots } =
+    const { plan, currentStepIndex, stepResults, messages, context, dialogueSlots, retrievedMemories } =
       state;
 
     // 1. 获取当前步骤
@@ -90,6 +90,10 @@ export function createExecuteNode(agentRegistry: AgentRegistry) {
         currentTime: context.currentTime,
       }),
       ...(dialogueSlots ? { dialogueSlots } : {}),
+      // 注入召回的用户记忆，供 serviceAgent/navigationAgent 等在 getSystemPrompt 中使用
+      ...(retrievedMemories && retrievedMemories.length > 0
+        ? { retrievedMemories }
+        : {}),
     };
     const executionInput: AgentExecutionInput = {
       step: currentStep,

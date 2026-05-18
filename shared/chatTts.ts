@@ -41,7 +41,8 @@ export type ChatThinkingPhase =
   | "reflected"
   | "memory_extracted"
   | "completed"
-  | "error";
+  | "error"
+  | "proactive_suggest";
 
 /** 单条思考事件细节（思考气泡内累积多条） */
 export interface ChatThinkingDetail {

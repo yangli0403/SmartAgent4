@@ -15,10 +15,11 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { useState, useRef, useEffect } from "react";
 import { useSupervisorStream } from "@/hooks/useSupervisorStream";
+import type { ProactiveSuggestion } from "@/hooks/useSupervisorStream";
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { getLoginUrl } from "@/const";
-import { Send, Settings, Mic, User } from "lucide-react";
+import { Send, Settings, Mic, User, Trash2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -40,7 +41,7 @@ import {
   notifyTtsStop,
   stageEventBus,
 } from "@/lib/airi-stage";
-import { playAiriAppearance } from "@/lib/interimAudioPlayer";
+import { playAiriAppearance, preloadInterimAudio } from "@/lib/interimAudioPlayer";
 import { useOmniMode, type UseOmniModeOptions } from "@/hooks/useOmniMode";
 
 // ==================== 文本噪声清理（Omni TTS 专用）====================
@@ -341,6 +342,18 @@ export default function Cockpit() {
     if (supervisorStream.details.length > 0) notifyToolRunning();
   }, [activeRequestId, supervisorStream.details]);
 
+  // ==================== 主动建议卡片状态 ====================
+  const [proactiveSuggestion, setProactiveSuggestion] = useState<ProactiveSuggestion | null>(null);
+  const [proactiveDismissed, setProactiveDismissed] = useState<Set<string>>(new Set());
+  // 监听主动建议事件
+  useEffect(() => {
+    if (!supervisorStream.proactiveSuggestion) return;
+    const suggestion = supervisorStream.proactiveSuggestion;
+    // 避免重复弹出同一 requestId 的建议
+    if (proactiveDismissed.has(suggestion.requestId)) return;
+    setProactiveSuggestion(suggestion);
+  }, [supervisorStream.proactiveSuggestion]);
+
   // ==================== AIRI 出场音效（仅首次模型加载完成时播放）====================
   const airiGreetingPlayed = useRef(false);
   useEffect(() => {
@@ -355,6 +368,10 @@ export default function Cockpit() {
     };
     stageEventBus.on("model_loaded", handler);
     return () => { stageEventBus.off("model_loaded", handler); };
+  }, []);
+  // 预加载过渡音频，确保首次播放无延迟
+  useEffect(() => {
+    preloadInterimAudio().catch(() => {});
   }, []);
 
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
@@ -685,6 +702,18 @@ export default function Cockpit() {
     }
   };
 
+  const deleteSessionMutation = trpc.chat.deleteSession.useMutation({
+    onSuccess: (_, variables) => {
+      toast.success("已删除会话");
+      utils.chat.listSessions.invalidate();
+      if (currentSessionId === variables.id) {
+        setCurrentSessionId(null);
+        setMessages([]);
+        hasInitialHistorySynced.current = false;
+      }
+    },
+    onError: () => toast.error("删除失败，请重试"),
+  });
   const createSessionMutation = trpc.chat.createSession.useMutation({
     onSuccess: (session) => {
       if (session) {
@@ -870,7 +899,7 @@ export default function Cockpit() {
         // VAD 配置：默认开启，能量阈值 0.015，静音 1.5s 后自动停止
         enabled: true,
         energyThreshold: 0.015,
-        silenceMs: 1500,
+        silenceMs: 2000,
         requireSpeechFirst: true,
         maxRecordingMs: 30000,
       }
@@ -963,6 +992,48 @@ export default function Cockpit() {
           }
         />
       </div>
+
+      {/* ==================== 主动建议卡片（重复操作检测）==================== */}
+      {proactiveSuggestion && (
+        <div className="absolute top-5 z-40 w-72 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 p-4 shadow-lg" style={{ right: '445px' }}>
+          <div className="flex items-start gap-2 mb-3">
+            <Sparkles className="h-4 w-4 text-yellow-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-white text-sm font-medium">发现常用场景</p>
+              <p className="text-white/60 text-xs mt-0.5">{proactiveSuggestion.patternDescription}</p>
+            </div>
+          </div>
+          <p className="text-white/80 text-xs mb-3">要将此操作保存为场景「{proactiveSuggestion.suggestedSceneName}」吗？</p>
+          {proactiveSuggestion.suggestedSteps.length > 0 && (
+            <ul className="text-white/60 text-xs mb-3 space-y-1">
+              {proactiveSuggestion.suggestedSteps.map((step, i) => (
+                <li key={i}>• {step}</li>
+              ))}
+            </ul>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                toast.success(`场景「${proactiveSuggestion.suggestedSceneName}」已添加到常用场景列表`);
+                setProactiveDismissed(prev => new Set([...prev, proactiveSuggestion.requestId]));
+                setProactiveSuggestion(null);
+              }}
+              className="flex-1 text-xs bg-blue-500/80 hover:bg-blue-500 text-white rounded-lg py-1.5 transition-colors"
+            >
+              设置场景
+            </button>
+            <button
+              onClick={() => {
+                setProactiveDismissed(prev => new Set([...prev, proactiveSuggestion.requestId]));
+                setProactiveSuggestion(null);
+              }}
+              className="flex-1 text-xs bg-white/10 hover:bg-white/20 text-white/70 rounded-lg py-1.5 transition-colors"
+            >
+              忽略
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ==================== 左下角：语音按钮 + 输入框 + 会话管理 + 用户记忆 ==================== */}
       <div className="absolute bottom-5 left-5 z-20 flex flex-col gap-3 w-64">
@@ -1144,20 +1215,33 @@ export default function Cockpit() {
               + 新建会话
             </button>
             {sessions.slice(0, 2).map((s) => (
-              <button
-                key={s.id}
-                onClick={() => {
-                  setCurrentSessionId(s.id);
-                  hasInitialHistorySynced.current = false;
-                }}
-                className={`text-[11px] px-2.5 py-1.5 rounded-full whitespace-nowrap transition-colors ${
-                  currentSessionId === s.id
-                    ? "bg-blue-500 text-white"
-                    : "bg-white/10 text-white/60 hover:bg-white/20"
-                }`}
-              >
-                {s.title}
-              </button>
+              <div key={s.id} className="relative group flex items-center">
+                <button
+                  onClick={() => {
+                    setCurrentSessionId(s.id);
+                    hasInitialHistorySynced.current = false;
+                  }}
+                  className={`text-[11px] px-2.5 py-1.5 pr-6 rounded-full whitespace-nowrap transition-colors ${
+                    currentSessionId === s.id
+                      ? "bg-blue-500 text-white"
+                      : "bg-white/10 text-white/60 hover:bg-white/20"
+                  }`}
+                >
+                  {s.title}
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`确定删除会话「${s.title}」？删除后无法恢复。`)) {
+                      deleteSessionMutation.mutate({ id: s.id });
+                    }
+                  }}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded-full hover:bg-red-500/80 text-white/60 hover:text-white"
+                  title="删除会话"
+                >
+                  <Trash2 className="h-2.5 w-2.5" />
+                </button>
+              </div>
             ))}
           </div>
         </div>

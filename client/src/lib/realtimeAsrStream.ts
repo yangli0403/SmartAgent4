@@ -38,7 +38,7 @@ export type VadOptions = {
 const DEFAULT_VAD: Required<VadOptions> = {
   enabled: true,
   energyThreshold: 0.015,
-  silenceMs: 1500,
+  silenceMs: 2000,
   requireSpeechFirst: true,
   maxRecordingMs: 30000,
 };
@@ -159,6 +159,14 @@ export class RealtimeAsrSession {
       };
     });
 
+    // 预录音缓冲区：在 ready 信号到达前，先将音频帧缓存起来
+    // 修复：DashScope task-started 需要 200-500ms，这段时间用户已开始说话但音频被丢弃
+    const preSendBuffer: ArrayBuffer[] = [];
+    let serverReady = false;
+
+    // 立即连接 source，开始录音（不等 ready 信号，避免开头音频丢失）
+    source.connect(processor);
+
     ws.onmessage = ev => {
       try {
         const msg = JSON.parse(ev.data as string) as {
@@ -168,7 +176,14 @@ export class RealtimeAsrSession {
           message?: string;
         };
         if (msg.type === "ready") {
-          source.connect(processor);
+          serverReady = true;
+          // 立即发送缓冲的预录音数据，补回开头丢失的音频
+          while (preSendBuffer.length > 0) {
+            const buf = preSendBuffer.shift();
+            if (buf && ws.readyState === WebSocket.OPEN) {
+              ws.send(buf);
+            }
+          }
           return;
         }
         if (msg.type === "asr" && typeof msg.text === "string") {
@@ -202,7 +217,13 @@ export class RealtimeAsrSession {
 
       const down = downsampleFloat32(input, audioContext.sampleRate, 16000);
       const pcm = floatTo16BitPCM(down);
-      ws.send(pcm.buffer);
+      if (!serverReady) {
+        // 服务端尚未就绪，缓存音频帧（最多保留约 2 秒 = 50 帧）
+        preSendBuffer.push(pcm.buffer);
+        if (preSendBuffer.length > 50) preSendBuffer.shift();
+      } else {
+        ws.send(pcm.buffer);
+      }
     };
 
     // 启动周期性静音检查（每 200ms 检查一次）

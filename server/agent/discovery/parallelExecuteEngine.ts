@@ -122,7 +122,7 @@ export function createParallelExecuteNode(registry: IAgentCardRegistry) {
   return async function parallelExecuteNode(
     state: SupervisorStateType
   ): Promise<Partial<SupervisorStateType>> {
-    const { plan, currentStepIndex, stepResults, messages, context, dialogueSlots } =
+    const { plan, currentStepIndex, stepResults, messages, context, dialogueSlots, retrievedMemories } =
       state;
 
     if (!plan || plan.length === 0) {
@@ -179,7 +179,8 @@ export function createParallelExecuteNode(registry: IAgentCardRegistry) {
           stepResults || [],
           messages,
           context,
-          dialogueSlots
+          dialogueSlots,
+          retrievedMemories
         )
       )
     );
@@ -215,7 +216,8 @@ const executeStep = traceable(
   previousResults: StepResult[],
   messages: any[],
   context: any,
-  dialogueSlots?: DialogueSlots
+  dialogueSlots?: DialogueSlots,
+  retrievedMemories?: string[]
 ): Promise<StepResult> {
   const startTime = Date.now();
 
@@ -249,6 +251,8 @@ const executeStep = traceable(
         currentTime: context.currentTime,
       }),
       ...(dialogueSlots ? { dialogueSlots } : {}),
+      // 将已召回的用户记忆传入每个 Agent，使 serviceAgent/navigationAgent 等都能利用用户记忆进行个性化回复
+      ...(retrievedMemories && retrievedMemories.length > 0 ? { retrievedMemories } : {}),
     };
     const input: AgentExecutionInput = {
       step,
@@ -299,6 +303,11 @@ export function resolveInputMapping(
 
   for (const [paramName, reference] of Object.entries(mapping)) {
     // 格式: "step_1.output" 或 "step_2.structuredData.pois"
+    // 防御： reference 可能是非字符串类型（replanNode 生成的计划中 inputMapping 可能包含非字符串引用）
+    if (typeof reference !== 'string') {
+      resolved[paramName] = reference;
+      continue;
+    }
     const match = reference.match(/^step_(\d+)\.(.+)$/);
     if (!match) {
       resolved[paramName] = reference;

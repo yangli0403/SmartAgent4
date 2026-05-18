@@ -30,6 +30,7 @@ import {
   type StreamUpdate,
 } from "./supervisorStreaming";
 import { publishSupervisorEvent } from "./supervisorEventBus";
+import { checkAndPublishProactiveSuggestion } from "../../memory/proactiveSuggestion";
 
 export interface SupervisorStreamingInput extends SupervisorInput {
   /** 与前端 SSE 通道关联的请求 ID（必须在 mutation 调用之前生成） */
@@ -137,6 +138,16 @@ export const runSupervisorStreaming = traceable(
         `[SupervisorStreaming] Completed requestId=${requestId}: ${output.stepsExecuted} steps, ` +
           `${output.totalToolCalls} tool calls, ${output.totalDurationMs}ms`
       );
+
+      // 异步检查高频行为模式，推送主动场景建议（fire-and-forget，不阻塞主流程）
+      const numericUserId = parseInt(input.context.userId, 10);
+      if (!isNaN(numericUserId)) {
+        setImmediate(() => {
+          checkAndPublishProactiveSuggestion(numericUserId, requestId).catch(
+            (e) => console.warn("[ProactiveSuggestion] async check failed:", (e as Error).message)
+          );
+        });
+      }
 
       return output;
     } catch (error) {
