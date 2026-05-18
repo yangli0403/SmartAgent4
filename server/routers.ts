@@ -149,6 +149,7 @@ import { getEmotionsClient } from "./emotions/emotionsClient";
 import { getUserProfileSnapshot } from "./memory/memorySystem";
 import type { User } from "../drizzle/schema";
 import { AiriBridgeService } from "./airi-bridge";
+import { persistSceneEpisode } from "./memory/sceneEpisode";
 
 // ==================== 初始化 AIRI Bridge（可选）====================
 let airiBridge: AiriBridgeService | null = null;
@@ -576,6 +577,47 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const success = await deleteMemory(input.id);
         return { success };
+      }),
+
+    saveSuggestedScene: protectedProcedure
+      .input(
+        z.object({
+          suggestedSceneName: z.string().min(1),
+          patternDescription: z.string().min(1),
+          patternType: z.string().min(1),
+          frequency: z.number().optional(),
+          suggestedSteps: z.array(z.string()).optional().default([]),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const user = await ensureUser(ctx);
+        const domain = /车|vehicle|灯|空调|座椅|ac|light|seat/i.test(
+          `${input.patternType} ${input.patternDescription} ${input.suggestedSteps.join(" ")}`
+        )
+          ? "vehicle_control"
+          : "general";
+        const episode = await persistSceneEpisode({
+          userId: user.id,
+          domain,
+          sceneName: input.suggestedSceneName,
+          summary: `${input.patternDescription}。用户已确认保存为常用场景。`,
+          triggerPhrases: [
+            input.suggestedSceneName,
+            `开启${input.suggestedSceneName}`,
+            `执行${input.suggestedSceneName}`,
+          ],
+          actions: input.suggestedSteps.map((step, index) => ({
+            tool: "scene_replay",
+            command: step,
+            args: { stepIndex: index + 1, sourcePatternType: input.patternType },
+          })),
+          safetyLevel: "confirm_before_execute",
+          importance: 0.88,
+          confidence: Math.min(0.95, 0.72 + (input.frequency ?? 3) * 0.04),
+          tags: ["scene", "proactive_suggestion", `pattern:${input.patternType}`],
+          versionGroup: `scene:${input.patternType}`,
+        });
+        return { success: Boolean(episode), episode };
       }),
 
     /**

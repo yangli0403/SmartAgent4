@@ -702,6 +702,16 @@ export default function Cockpit() {
     }
   };
 
+  const saveSuggestedSceneMutation = trpc.memory.saveSuggestedScene.useMutation({
+    onSuccess: () => {
+      toast.success("场景已保存，可在后续对话中复用");
+      void utils.memory.list.invalidate();
+    },
+    onError: (error) => {
+      toast.error("保存场景失败: " + error.message);
+    },
+  });
+
   const deleteSessionMutation = trpc.chat.deleteSession.useMutation({
     onSuccess: (_, variables) => {
       toast.success("已删除会话");
@@ -1014,10 +1024,17 @@ export default function Cockpit() {
           <div className="flex gap-2">
             <button
               onClick={() => {
-                toast.success(`场景「${proactiveSuggestion.suggestedSceneName}」已添加到常用场景列表`);
+                saveSuggestedSceneMutation.mutate({
+                  suggestedSceneName: proactiveSuggestion.suggestedSceneName,
+                  patternDescription: proactiveSuggestion.patternDescription,
+                  patternType: proactiveSuggestion.patternType,
+                  frequency: proactiveSuggestion.frequency,
+                  suggestedSteps: proactiveSuggestion.suggestedSteps,
+                });
                 setProactiveDismissed(prev => new Set([...prev, proactiveSuggestion.requestId]));
                 setProactiveSuggestion(null);
               }}
+              disabled={saveSuggestedSceneMutation.isPending}
               className="flex-1 text-xs bg-blue-500/80 hover:bg-blue-500 text-white rounded-lg py-1.5 transition-colors"
             >
               设置场景

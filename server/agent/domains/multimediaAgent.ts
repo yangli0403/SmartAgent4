@@ -38,6 +38,8 @@ export const MULTIMEDIA_AGENT_CONFIG: DomainAgentConfig = {
 4. 搜索到歌曲后，可以用 get_song_detail 获取详情，用 get_lyric 获取歌词，用 get_album 获取专辑信息
 5. 推荐歌曲时，说明推荐理由（如节奏特点、风格等）
 6. 如果用户想了解某个歌手，使用 get_artist 获取歌手信息和热门歌曲
+7. 你具备偏好记忆能力：当用户说“我喜欢听……”“我常听……”“以后给我推荐……”等音乐/音频偏好时，必须调用 memory_store 存为 preference；当需要做个性化推荐时，必须先结合系统已注入的 recalled memories，必要时再调用 memory_search 检索“音乐/多媒体/偏好”相关记忆。
+8. 如果召回记忆显示用户喜欢某类音乐、歌手、场景音或白噪音，推荐时必须优先体现这些偏好，并简要说明“根据你的偏好”。
 
 音乐知识参考：
 - 节奏强的歌曲通常 BPM 较高（>120），有明显的鼓点和节拍
@@ -52,6 +54,8 @@ export const MULTIMEDIA_AGENT_CONFIG: DomainAgentConfig = {
     "get_playlist",
     "get_album",
     "get_artist",
+    "memory_store",
+    "memory_search",
   ],
   maxIterations: 5,
   temperature: 0.5,
@@ -80,6 +84,22 @@ export class MultimediaAgent extends BaseAgent {
 
     if (context?.currentTime) {
       prompt += `\n\n当前时间: ${context.currentTime}`;
+    }
+
+    if (context?.userId) {
+      prompt += `\n当前用户ID: ${context.userId}（调用 memory_store/memory_search 时，userId 参数必须填入此值）`;
+    }
+
+    const recalled = context?.retrievedMemories as Array<{ content?: string; type?: string; kind?: string; tags?: string[] }> | undefined;
+    if (recalled && recalled.length > 0) {
+      const lines = recalled
+        .slice(0, 6)
+        .map((m, i) => `${i + 1}. ${m.content ?? ""}`.trim())
+        .filter(Boolean)
+        .join("\n");
+      if (lines) {
+        prompt += `\n\n已召回的用户长期记忆（做音乐/多媒体推荐时必须优先参考）：\n${lines}`;
+      }
     }
 
     return prompt;

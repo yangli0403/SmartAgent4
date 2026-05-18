@@ -143,14 +143,15 @@ export function useSupervisorStream(
           suggestedSceneName?: string;
           suggestedSteps?: string[];
         } }).payload;
-        if (payload?.suggestedSceneName) {
+        const suggestedSceneName = payload?.suggestedSceneName;
+        if (suggestedSceneName) {
           setState((prev) => ({
             ...prev,
             proactiveSuggestion: {
               patternDescription: payload.patternDescription || "",
               patternType: payload.patternType || "",
               frequency: payload.frequency || 3,
-              suggestedSceneName: payload.suggestedSceneName,
+              suggestedSceneName,
               suggestedSteps: payload.suggestedSteps || [],
               requestId: env.requestId,
             },

@@ -11,6 +11,7 @@ import type {
   AgentExecutionInput,
 } from "../domains/types";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import { recordDeterministicActionPatterns } from "../../memory/deterministicBehaviorAggregator";
 
 /**
  * Domain Agent 注册表类型
@@ -120,6 +121,21 @@ export function createExecuteNode(agentRegistry: AgentRegistry) {
       console.log(
         `[ExecuteNode] Step ${currentStep.id} completed: ${result.status} (${result.durationMs}ms, ${result.toolCalls?.length || 0} tool calls)`
       );
+
+      const numericUserId = context?.userId ? parseInt(context.userId, 10) : NaN;
+      if (!Number.isNaN(numericUserId)) {
+        await recordDeterministicActionPatterns({
+          userId: numericUserId,
+          userText,
+          step: currentStep,
+          result,
+        }).catch((e) =>
+          console.warn(
+            "[ExecuteNode] deterministic behavior aggregation failed:",
+            (e as Error).message
+          )
+        );
+      }
 
       // 7. 将 Agent 输出作为 AI 消息追加到消息流
       const aiMessage = new AIMessage(

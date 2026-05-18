@@ -14,12 +14,9 @@ export async function synthesizeReplyTts(
   /** 供 AIRI 映射；无合成时可为 undefined */
   multimodal?: MultimodalSegment[];
 }> {
-  if (process.env.EMOTIONS_SYSTEM_ENABLED === "false") {
-    return {
-      payload: { status: "skipped", reason: "disabled", segments: [] },
-    };
-  }
-
+  // 不再用 EMOTIONS_SYSTEM_ENABLED 短路最终回复 TTS。
+  // 该开关只应控制本地 Emotions-System 微服务；云端 DashScope/CosyVoice
+  // 只要配置了 DASHSCOPE_API_KEY，就应继续尝试合成，避免最终摘要语音被跳过。
   try {
     const client = getEmotionsClient();
     const segments = await client.render(responseText, sessionKey);

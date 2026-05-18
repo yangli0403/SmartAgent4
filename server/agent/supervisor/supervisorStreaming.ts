@@ -109,13 +109,19 @@ export function publishEventsFromUpdates(
     const reasoningSnippet = cls.reasoning
       ? `（${cls.reasoning.length > 28 ? cls.reasoning.slice(0, 28) + "…" : cls.reasoning}）`
       : "";
+    const isWeatherIntent = /\[rule:weather_intent\]|天气|气温|温度|预报/.test(
+      cls.reasoning ?? ""
+    );
+    const displayDomain =
+      cls.domain === "navigation" && isWeatherIntent ? "天气查询/出行服务" : cls.domain;
     publishSupervisorEvent({
       requestId: ctx.requestId,
       type: "classified",
       phase: "classified",
-      summary: `任务分类：${cls.domain}·${cls.complexity}${reasoningSnippet}`,
+      summary: `任务分类：${displayDomain}·${cls.complexity}${reasoningSnippet}`,
       payload: {
         domain: cls.domain,
+        displayDomain,
         complexity: cls.complexity,
         reasoning: cls.reasoning ?? "",
       },

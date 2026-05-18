@@ -72,6 +72,12 @@ function floatTo16BitPCM(float32: Float32Array): Uint8Array {
   return new Uint8Array(buffer);
 }
 
+function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
 /** 计算 PCM 帧的 RMS（均方根能量），返回 0~1 范围 */
 function computeRms(input: Float32Array): number {
   let sumSq = 0;
@@ -219,10 +225,11 @@ export class RealtimeAsrSession {
       const pcm = floatTo16BitPCM(down);
       if (!serverReady) {
         // 服务端尚未就绪，缓存音频帧（最多保留约 2 秒 = 50 帧）
-        preSendBuffer.push(pcm.buffer);
+        const frame = toOwnedArrayBuffer(pcm);
+        preSendBuffer.push(frame);
         if (preSendBuffer.length > 50) preSendBuffer.shift();
       } else {
-        ws.send(pcm.buffer);
+        ws.send(toOwnedArrayBuffer(pcm));
       }
     };
 
