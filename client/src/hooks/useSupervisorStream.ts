@@ -66,12 +66,20 @@ export function useSupervisorStream(
     details: [],
   });
   const esRef = useRef<EventSource | null>(null);
+  const completedRef = useRef(false);
+  const finalCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!requestId) {
       setState({ status: "idle", details: [] });
       return;
     }
+
+    if (finalCloseTimerRef.current) {
+      clearTimeout(finalCloseTimerRef.current);
+      finalCloseTimerRef.current = null;
+    }
+    completedRef.current = false;
 
     const url = `/api/supervisor/stream?requestId=${encodeURIComponent(requestId)}`;
     const es = new EventSource(url);
@@ -116,18 +124,30 @@ export function useSupervisorStream(
         const env = JSON.parse(ev.data) as SupervisorEventEnvelope;
         append(env);
         const payload = (env as { payload?: { response?: string } }).payload;
+        completedRef.current = true;
         setState((prev) => ({
           ...prev,
           status: "completed",
           finalResponse: payload?.response,
         }));
-        es.close();
+
+        // 后端的主动建议可能在 final 之后异步发布。这里保留短暂 SSE 窗口，
+        // 避免“三次重复操作已落库但 proactive_suggest 事件被 final 关闭连接截断”。
+        if (finalCloseTimerRef.current) clearTimeout(finalCloseTimerRef.current);
+        finalCloseTimerRef.current = setTimeout(() => {
+          es.close();
+          if (esRef.current === es) esRef.current = null;
+        }, 5000);
       } catch {
         // ignore
       }
     };
 
     const onError = () => {
+      if (completedRef.current) {
+        es.close();
+        return;
+      }
       setState((prev) => ({ ...prev, status: "failed" }));
       es.close();
     };
@@ -191,6 +211,10 @@ export function useSupervisorStream(
       es.removeEventListener("final", onFinal as EventListener);
       es.removeEventListener("error", onError as EventListener);
       es.removeEventListener("proactive_suggest", onProactiveSuggest as EventListener);
+      if (finalCloseTimerRef.current) {
+        clearTimeout(finalCloseTimerRef.current);
+        finalCloseTimerRef.current = null;
+      }
       es.close();
       esRef.current = null;
     };

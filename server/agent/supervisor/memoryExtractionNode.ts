@@ -20,6 +20,7 @@ import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import {
   extractMemoriesFromConversation,
   appendWorkingMemory,
+  addMemory,
 } from "../../memory/memorySystem";
 import { detectAndPersistPatterns } from "../../memory/behaviorDetector";
 
@@ -55,6 +56,72 @@ const BEHAVIOR_DETECTION_THRESHOLD = parseInt(
 
 /** 每个用户的对话轮数计数器 */
 const userDialogueCounters = new Map<number, number>();
+
+/**
+ * 显式喜好类记忆兜底提取。
+ *
+ * 自动 LLM 提取默认关闭后，Agent 虽然具备 memory_store 技能，但简单任务
+ * 往往不会主动调用该工具，导致“我喜欢/我偏好/以后优先”等持久偏好没有落库。
+ * 这里仅捕获用户明确表达的稳定偏好，不处理普通指令，避免扩大自动记忆范围。
+ */
+function extractExplicitPreferenceText(content: string): string | null {
+  const text = content.trim().replace(/\s+/g, " ");
+  if (!text) return null;
+
+  const preferencePatterns = [
+    /(?:我|本人)(?:更?喜欢|偏好|更偏好|爱看|常看|经常看|感兴趣(?:的是)?)([^。！？\n]{1,80})/,
+    /(?:我|本人)(?:不喜欢|讨厌|不爱看|不想看)([^。！？\n]{1,80})/,
+    /(?:以后|下次|后续).{0,20}(?:优先|多|少|不要|别).{0,40}(?:推荐|展示|播放|提醒|告诉|播报)([^。！？\n]{0,80})/,
+    /(?:记住|记一下|帮我记住).{0,30}(?:我|本人).{0,20}(?:喜欢|偏好|不喜欢|讨厌|感兴趣)([^。！？\n]{0,80})/,
+  ];
+
+  if (!preferencePatterns.some((pattern) => pattern.test(text))) {
+    return null;
+  }
+
+  return text.slice(0, 160);
+}
+
+function buildPreferenceVersionGroup(content: string): string {
+  const normalized = content
+    .toLowerCase()
+    .replace(/[^\p{Script=Han}\p{Letter}\p{Number}]+/gu, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+  return `explicit_preference_${normalized || "general"}`;
+}
+
+async function persistExplicitPreferenceMemory(
+  userId: number,
+  content: string
+): Promise<boolean> {
+  const preferenceText = extractExplicitPreferenceText(content);
+  if (!preferenceText) return false;
+
+  const saved = await addMemory({
+    userId,
+    kind: "persona",
+    type: "preference",
+    content: `用户偏好：${preferenceText}`,
+    importance: 0.82,
+    confidence: 0.9,
+    source: "explicit_preference_rule",
+    versionGroup: buildPreferenceVersionGroup(preferenceText),
+    tags: ["preference", "explicit", "user_profile"],
+    metadata: {
+      source: "memoryExtractionNode.explicitPreferenceRule",
+      tags: ["preference", "explicit", "user_profile"],
+    },
+  });
+
+  if (saved) {
+    console.log(
+      `[MemoryExtractionNode] Explicit preference persisted: id=${saved.id}`
+    );
+    return true;
+  }
+  return false;
+}
 
 /**
  * 记忆提取节点
@@ -119,6 +186,18 @@ export async function memoryExtractionNode(
   if (lastUserMsg) {
     appendWorkingMemory(userId, sessionId, lastUserMsg);
   }
+
+  // 自动提取默认关闭时，仍对“我喜欢/我偏好/以后优先”等显式稳定偏好做兜底落库。
+  const explicitPreferencePersisted = lastUserMsg
+    ? await persistExplicitPreferenceMemory(userId, lastUserMsg.content).catch((err) => {
+        console.warn(
+          "[MemoryExtractionNode] Explicit preference persist failed:",
+          (err as Error).message
+        );
+        return false;
+      })
+    : false;
+
   if (finalResponse) {
     appendWorkingMemory(userId, sessionId, {
       role: "assistant",
@@ -168,7 +247,7 @@ export async function memoryExtractionNode(
       memoryExtractionMeta: {
         workingMemoryUpdated: Boolean(lastUserMsg) || Boolean(finalResponse),
         behaviorDetectionTriggered: currentCount === 0, // 0 = 刚被重置，表示本轮触发了
-        extractedCount: 0,
+        extractedCount: explicitPreferencePersisted ? 1 : 0,
       },
     };
   }

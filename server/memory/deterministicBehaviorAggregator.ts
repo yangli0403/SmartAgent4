@@ -1,5 +1,5 @@
-import { and, desc, eq } from "drizzle-orm";
 import { createHash } from "crypto";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { behaviorPatterns } from "../../drizzle/schema";
 import type { PlanStep, StepResult, ToolCallRecord } from "../agent/supervisor/state";
