@@ -128,12 +128,17 @@ export async function recordDeterministicActionPatterns(
   );
 
   if (existing[0]) {
+    // 若 confidence 已被 ProactiveSuggestion 标记为 0.99（已推送），则不覆盖，防止重复推送
+    const SUGGESTED_MARKER = 0.99;
+    const newConfidence = existing[0].confidence >= SUGGESTED_MARKER
+      ? existing[0].confidence
+      : Math.min(0.95, Math.max(existing[0].confidence, 0.7 + nextFrequency * 0.06));
     await db
       .update(behaviorPatterns)
       .set({
         description,
         frequency: nextFrequency,
-        confidence: Math.min(0.95, Math.max(existing[0].confidence, 0.7 + nextFrequency * 0.06)),
+        confidence: newConfidence,
         lastObserved: now,
         updatedAt: now,
       })

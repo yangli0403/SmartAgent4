@@ -9,6 +9,7 @@
  * 支持个性化作息（起床/睡觉时间）、多日行程、偏好筛选。
  */
 import type { ToolRegistry } from "../../mcp/toolRegistry";
+import http from "node:http";
 import https from "node:https";
 import {
   diskCacheGet,
@@ -27,7 +28,8 @@ warmupStaticPois();
 
 export const ITINERARY_TOOLS_SERVER_ID = "builtin-itinerary-tools";
 
-const AMAP_BASE = "https://restapi.amap.com/v3";
+// 沙盒环境 HTTPS(443) 被封锁，改用 HTTP
+const AMAP_BASE = "http://restapi.amap.com/v3";
 
 /**
  * 使用 node:https 模块发起 GET 请求，绕过 undici 全局 dispatcher 的连接池问题。
@@ -38,7 +40,9 @@ const AMAP_BASE = "https://restapi.amap.com/v3";
  */
 function httpsGetOnce(url: string, timeoutMs: number): Promise<any> {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { timeout: timeoutMs }, (res) => {
+    // 根据 URL 协议选择 http 或 https 模块
+    const requester = url.startsWith("https://") ? https : http;
+    const req = requester.get(url, { timeout: timeoutMs }, (res) => {
       let data = "";
       res.on("data", (chunk: Buffer) => { data += chunk.toString(); });
       res.on("end", () => {

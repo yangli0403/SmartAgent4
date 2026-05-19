@@ -134,10 +134,11 @@ export function useSupervisorStream(
         // 后端的主动建议可能在 final 之后异步发布。这里保留短暂 SSE 窗口，
         // 避免“三次重复操作已落库但 proactive_suggest 事件被 final 关闭连接截断”。
         if (finalCloseTimerRef.current) clearTimeout(finalCloseTimerRef.current);
+        // 延长到 15s：后端 LLM 生成场景名称可能耗时 5-10s，5s 窗口不够
         finalCloseTimerRef.current = setTimeout(() => {
           es.close();
           if (esRef.current === es) esRef.current = null;
-        }, 5000);
+        }, 15000);
       } catch {
         // ignore
       }
