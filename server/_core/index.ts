@@ -1,4 +1,6 @@
-import "dotenv/config";
+// 使用 override 模式，让 .env 文件的值覆盖系统环境变量（沙盒中系统级 OPENAI_BASE_URL 会干扰配置）
+import dotenv from "dotenv";
+dotenv.config({ override: true });
 import express from "express";
 import { createServer } from "http";
 import net from "net";
