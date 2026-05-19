@@ -10,6 +10,18 @@
  */
 import type { ToolRegistry } from "../../mcp/toolRegistry";
 import https from "node:https";
+import {
+  diskCacheGet,
+  diskCacheSet,
+  initDiskCache,
+  GEOCODE_TTL_MS,
+  POI_TTL_MS,
+} from "../../cache/diskCache";
+import { warmupStaticPois, getGeocodeKey, getPoiKey } from "../../cache/staticPois";
+
+// 启动时初始化磁盘缓存并预热静态 POI 数据
+initDiskCache();
+warmupStaticPois();
 
 // ==================== 常量 ====================
 
@@ -116,6 +128,13 @@ interface AmapPOI {
 }
 
 async function amapGeocode(address: string, city?: string): Promise<{ lng: string; lat: string; city: string } | null> {
+  // 先查磁盘缓存（静态预热 + 历史请求结果）
+  const geoCacheKey = getGeocodeKey(address);
+  const cachedGeo = diskCacheGet<{ lng: string; lat: string; city: string }>(geoCacheKey);
+  if (cachedGeo) {
+    console.log(`[ItineraryTools] Geocode cache HIT: ${address}`);
+    return cachedGeo;
+  }
   const key = getAmapKey();
   console.log(`[ItineraryTools] Geocode: address=${address}, key=${key ? 'present' : 'MISSING'}`);
   if (!key) return null;
@@ -128,7 +147,10 @@ async function amapGeocode(address: string, city?: string): Promise<{ lng: strin
     if (data.status === "1" && data.geocodes?.length > 0) {
       const g = data.geocodes[0];
       const [lng, lat] = g.location.split(",");
-      return { lng, lat, city: g.city || city || "" };
+      const geoResult = { lng, lat, city: g.city || city || "" };
+      // 写入磁盘缓存（7天TTL）
+      diskCacheSet(geoCacheKey, geoResult, GEOCODE_TTL_MS);
+      return geoResult;
     }
   } catch (e: any) {
     console.error(`[ItineraryTools] Geocode failed: ${e.message}`, e.cause ? `cause: ${JSON.stringify(e.cause)}` : "");
@@ -142,6 +164,20 @@ async function amapPOISearch(
   types?: string,
   offset: number = 5
 ): Promise<AmapPOI[]> {
+  // 先查磁盘缓存
+  const poiCacheKey = `poi_text:${city}:${keywords}:${types || ""}:${offset}`;
+  const cachedPois = diskCacheGet<AmapPOI[]>(poiCacheKey);
+  if (cachedPois) {
+    console.log(`[ItineraryTools] POI search cache HIT: ${city}/${keywords}`);
+    return cachedPois;
+  }
+  // 查静态预热数据（按城市+类型匹配）
+  const staticPoiKey = getPoiKey(city, keywords);
+  const staticPois = diskCacheGet<AmapPOI[]>(staticPoiKey);
+  if (staticPois) {
+    console.log(`[ItineraryTools] POI static cache HIT: ${staticPoiKey}`);
+    return staticPois;
+  }
   const key = getAmapKey();
   if (!key) {
     console.error("[ItineraryTools] AMAP_API_KEY not found in env");
@@ -155,7 +191,7 @@ async function amapPOISearch(
     const data = await httpsGet(url);
     console.log(`[ItineraryTools] POI search result: status=${data.status}, count=${data.count}`);
     if (data.status === "1" && data.pois?.length > 0) {
-      return data.pois.map((p: any) => ({
+      const pois = data.pois.map((p: any) => ({
         name: p.name,
         address: typeof p.address === "string" ? p.address : "",
         location: p.location,
@@ -163,6 +199,9 @@ async function amapPOISearch(
         rating: p.biz_ext?.rating,
         biz_ext: p.biz_ext,
       }));
+      // 写入磁盘缓存（6小时TTL）
+      diskCacheSet(poiCacheKey, pois, POI_TTL_MS);
+      return pois;
     }
   } catch (e: any) {
     console.error(`[ItineraryTools] POI search failed: ${e.message}`, e.cause ? `cause: ${JSON.stringify(e.cause)}` : "");
@@ -177,6 +216,13 @@ async function amapAroundSearch(
   radius: number = 3000,
   offset: number = 3
 ): Promise<AmapPOI[]> {
+  // 先查磁盘缓存
+  const aroundCacheKey = `poi_around:${location}:${keywords}:${types || ""}:${radius}:${offset}`;
+  const cachedAround = diskCacheGet<AmapPOI[]>(aroundCacheKey);
+  if (cachedAround) {
+    console.log(`[ItineraryTools] Around search cache HIT: ${location}/${keywords}`);
+    return cachedAround;
+  }
   const key = getAmapKey();
   if (!key) return [];
   const params = new URLSearchParams({
@@ -191,7 +237,7 @@ async function amapAroundSearch(
   try {
     const data = await httpsGet(`${AMAP_BASE}/place/around?${params}`);
     if (data.status === "1" && data.pois?.length > 0) {
-      return data.pois.map((p: any) => ({
+      const aroundPois = data.pois.map((p: any) => ({
         name: p.name,
         address: typeof p.address === "string" ? p.address : "",
         location: p.location,
@@ -199,6 +245,9 @@ async function amapAroundSearch(
         rating: p.biz_ext?.rating,
         biz_ext: p.biz_ext,
       }));
+      // 写入磁盘缓存（6小时TTL）
+      diskCacheSet(aroundCacheKey, aroundPois, POI_TTL_MS);
+      return aroundPois;
     }
   } catch (e) {
     console.error("[ItineraryTools] Around search failed:", e);
