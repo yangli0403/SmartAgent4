@@ -211,6 +211,7 @@ export async function addMemory(memory: InsertMemory): Promise<Memory | null> {
           {
             content: memory.content,
             kind: memory.kind,
+            type: memory.type ?? undefined,
             versionGroup: memory.versionGroup,
             userId: memory.userId,
           },

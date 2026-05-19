@@ -291,6 +291,54 @@ export function refineClassificationForDirectoryInventoryIntent(
   }
 }
 
+// ==================== V5 新增：车控/座舱控制意图纠偏 ====================
+
+/**
+ * 车控/座舱控制指令强制路由到 multimediaAgent。
+ *
+ * 设计说明：
+ * - 车控指令（空调、大灯、车窗、白噪音等）应路由到 multimediaAgent，它具备车控工具
+ * - 当 guardDomain 返回 vehicle_control 时，classifyNode 的短路逻辑会直接命中
+ * - 此函数作为 LLM 分类后的兜底纠偏，防止 LLM 将车控误判为其他域
+ */
+export function refineClassificationForVehicleControl(
+  userText: string,
+  classification: TaskClassification
+): void {
+  const t = userText.trim();
+  if (!t) return;
+
+  const VEHICLE_PATTERNS = [
+    /空调.{0,10}(\d+度|制冷|制热|关|开|调|温度|风速)/,
+    /(调|设置|开|关).{0,6}空调/,
+    /(开|关|调).{0,6}(大灯|车灯|氛围灯|内饰灯|远光|近光)/,
+    /(大灯|车灯).{0,6}(开|关|调)/,
+    /(开|关|升|降).{0,6}(车窗|窗户|天窗)/,
+    /(调|升|降|前移|后移).{0,6}(座椅|椅背|靠背)/,
+    /(放|播放|开).{0,6}(白噪音|雨声|自然音|环境音|睡眠音乐)/,
+  ];
+
+  const isVehicleControl = VEHICLE_PATTERNS.some((p) => p.test(t));
+  if (!isVehicleControl) return;
+
+  // 已经路由到 multimediaAgent 则无需覆盖
+  if (
+    classification.domain === "multimedia" &&
+    (classification.requiredAgents?.includes("multimediaAgent") ?? false)
+  ) {
+    return;
+  }
+
+  console.log(
+    `[ClassifyNode] Rule override: vehicle control intent detected (was ${classification.domain}), forcing multimedia + multimediaAgent`
+  );
+  classification.domain = "multimedia";
+  classification.complexity = "simple";
+  classification.requiredAgents = ["multimediaAgent"];
+  classification.reasoning =
+    `[rule:vehicle_control] ${classification.reasoning || ""}`.trim();
+}
+
 // ==================== V3 新增：Follow-up 意图延续 ====================
 
 /**
@@ -585,20 +633,23 @@ export async function classifyNode(
   // 仅在极高置信度命中时生效，避免误警。
   const shortCircuit = canShortCircuit(userText);
   if (shortCircuit.ok && shortCircuit.domain && shortCircuit.agent) {
+    // vehicle_control 域映射到 multimediaAgent（它具备车控工具）
+    const resolvedDomain = shortCircuit.domain === "vehicle_control" ? "multimedia" : shortCircuit.domain;
+    const resolvedAgent = shortCircuit.domain === "vehicle_control" ? "multimediaAgent" : shortCircuit.agent;
     console.log(
-      `[ClassifyNode] Short-circuit: domain=${shortCircuit.domain}, agent=${shortCircuit.agent}, top=${shortCircuit.topScores.map((s) => `${s.domain}:${s.score.toFixed(3)}`).join(",")}`
+      `[ClassifyNode] Short-circuit: domain=${resolvedDomain}, agent=${resolvedAgent}, top=${shortCircuit.topScores.map((s) => `${s.domain}:${s.score.toFixed(3)}`).join(",")}`
     );
     const shortClassification: TaskClassification = {
-      domain: shortCircuit.domain as TaskDomain,
+      domain: resolvedDomain as TaskDomain,
       complexity: "simple",
       reasoning: `[rule:similarity_short_circuit] 相似度短路命中 top=${shortCircuit.topScores[0]?.score.toFixed(3)}`,
-      requiredAgents: [shortCircuit.agent],
+      requiredAgents: [resolvedAgent],
     };
     let scPlan: PlanStep[] = [
       {
         id: 1,
         description: userText,
-        targetAgent: shortCircuit.agent,
+        targetAgent: resolvedAgent,
         expectedTools: [],
         dependsOn: [],
         inputMapping: {},
@@ -639,13 +690,15 @@ export async function classifyNode(
     refineClassificationForMusicIntent(userText, classification);
     refineClassificationForDiskIntent(userText, classification);
     refineClassificationForDirectoryInventoryIntent(userText, classification);
-    // V3 新增：新闻意图纠�?
+    // V3 新增：新闻意图纠偏
     refineClassificationForNewsIntent(userText, classification);
     // V4 新增：天气查询强制路由到 navigationAgent
     refineClassificationForWeatherIntent(userText, classification);
+    // V5 新增：车控/座舱控制指令强制路由到 multimediaAgent（在 music 纠偏之后，防止车控被误判为音乐）
+    refineClassificationForVehicleControl(userText, classification);
     // V3 新增：follow-up 意图延续纠偏
     refineClassificationForFollowUp(userText, classification, messages);
-    // V4 新增：相似度二次纠偏（在所有规则纠偏之后兜底应用）
+    // V4 新增：相似度二次纠偏（在所有规则纠偏之后底底应用）
     refineClassificationBySimilarity(userText, classification);
 
     // 验证 requiredAgents：确保引用的 Agent 在注册表中存�?

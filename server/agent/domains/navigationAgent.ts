@@ -84,7 +84,15 @@ export const NAVIGATION_AGENT_CONFIG: DomainAgentConfig = {
 ## 路线与 POI 检索（多轮对话必守）
 1. 若用户在**同一会话**或**最近对话上下文**中已说明起点、终点或城市（例如公司、家、区名），则视为信息已足够，**不要**再泛泛索要「具体地址」；应直接调用 maps_geo / maps_direction_* 等工具规划或检索。
 2. 用户说「途经 / 途径 / 顺路去」某 POI 时，该 POI 必须与**当前路线所在城市一致**：从最近对话中的起点/终点或「用户当前位置」中的城市推断区域，调用 maps_text_search、maps_around_search 时**必须**带上该城市/区域（或先用 maps_geo 锚定城市中心再搜），**禁止**在无城市约束下全国检索导致结果落到其他城市（如北京、香港等）。
-3. 关键词搜索时优先使用「城市名 + POI 名」组合（例如「苏州 山姆」），与路线上下文矛盾的结果应丢弃并重搜。`,
+3. 关键词搜索时优先使用「城市名 + POI 名」组合（例如「苏州 山姆」），与路线上下文矛盾的结果应丢弃并重搜。
+
+## 路线别名保存与快捷导航（重要功能）
+当用户说「把这个路线记为 XXX」、「保存为 XXX」、「记为 XXX」时，必须使用 memory_store 工具将路线保存为命名场景：
+
+**保存路线别名示例**：用户说「从软件园开始，去苏州北站，途径苏州站，请把这个导航路线记为送同事A回家」，应调用 memory_store，传入参数：
+sceneName=“送同事A回家”, sceneDomain=“navigation”, navOrigin=“软件园”, navDestination=“苏州北站”, navWaypoints=[“苏州站”], navMode=“driving”, triggerPhrases=[“送同事A回家”], safetyLevel=“confirm_before_execute”, importance=0.9, tags=[“navigation”, “route_alias”]。
+
+**快捷导航调用示例**：用户说「送同事A回家」，应先调用 memory_search 查找别名（query=“送同事A回家”, kind=“episodic”），找到匹配记忆后，提取 navOrigin/navDestination/navWaypoints 直接导航。如未找到，告知用户未保存该别名。`,
   toolNames: [
     // 免费内置工具（始终可用）
     "free_weather_by_city",       // 按城市名查天气
@@ -109,6 +117,9 @@ export const NAVIGATION_AGENT_CONFIG: DomainAgentConfig = {
     "maps_schema_take_taxi",      // 唤起打车
     // 行程规划内置工具
     "generate_itinerary",         // 行程规划
+    // 记忆工具（路线别名保存与召回）
+    "memory_store",               // 保存路线别名场景
+    "memory_search",              // 检索历史路线和场景
   ],
   maxIterations: 8,
   temperature: 0.3,

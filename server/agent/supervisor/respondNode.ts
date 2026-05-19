@@ -195,10 +195,25 @@ ${agentOutput}
     return isShortGreeting || (hasNoToolCalls && userText.length < 20);
   })();
 
+  // === 检测是否为车控/设备控制指令，此类任务不应注入无关的个人偏好记忆 ===
+  const VEHICLE_CONTROL_PATTERNS = [
+    /^(\u5e2e\u6211)?(\u6253\u5f00|\u5173\u95ed|\u5173\u6389|\u5f00\u542f|\u8c03\u5230|\u8bbe\u7f6e|\u8c03\u4f4e|\u8c03\u9ad8|\u964d\u4f4e|\u5347\u9ad8).{0,10}(\u7a7a\u8c03|\u8f66\u5185\u6e29\u5ea6|\u6e29\u5ea6|\u98ce\u91cf|\u98ce\u901f|\u5236\u51b7|\u5236\u70ed|\u6696\u98ce|\u51b7\u98ce)/i,
+    /^\u7a7a\u8c03.{0,20}(\u6253\u5f00|\u5173\u95ed|\u5173\u6389|\u5f00\u542f|\u8c03\u5230|\u8bbe\u7f6e|\u8c03\u4f4e|\u8c03\u9ad8|\d+\u5ea6)/i,
+    /^(\u5e2e\u6211)?(\u6253\u5f00|\u5173\u95ed|\u5173\u6389|\u5f00\u542f|\u8c03\u4eae|\u8c03\u6697|\u5f00|\u5173).{0,10}(\u5927\u706f|\u8f66\u706f|\u5185\u9970\u706f|\u6c1b\u56f4\u706f|\u8fdc\u5149|\u8fd1\u5149|\u53cc\u95ea|\u8f6c\u5411\u706f)/i,
+    /^(\u5e2e\u6211)?(\u6253\u5f00|\u5173\u95ed|\u5173\u6389|\u5f00\u542f|\u5347\u8d77|\u964d\u4e0b|\u6447\u4e0a|\u6447\u4e0b).{0,10}(\u8f66\u7a97|\u5929\u7a97|\u73bb\u7483)/i,
+    /^(\u5e2e\u6211)?(\u64ad\u653e|\u6253\u5f00|\u5173\u95ed|\u5173\u6389|\u5f00\u542f|\u505c\u6b62).{0,10}(\u767d\u566a\u97f3|\u96e8\u58f0|\u6d77\u6d6a\u58f0|\u81ea\u7136\u97f3\u6548|\u73af\u5883\u97f3)/i,
+    /^(\u7a7a\u8c03|\u5927\u706f|\u8f66\u706f|\u8f66\u7a97|\u5ea7\u6905|\u767d\u566a\u97f3|\u6e29\u5ea6|\u98ce\u91cf).{0,5}[\uff0c,\u3001].{0,60}(\u7a7a\u8c03|\u5927\u706f|\u8f66\u706f|\u8f66\u7a97|\u5ea7\u6905|\u767d\u566a\u97f3|\u6e29\u5ea6|\u98ce\u91cf|\d+\u5ea6)/i,
+  ];
+  const isVehicleControl = (() => {
+    const domain = taskClassification?.domain;
+    if (domain && ["vehicle_control", "device_control"].includes(domain)) return true;
+    return VEHICLE_CONTROL_PATTERNS.some((p) => p.test(userText.trim()));
+  })();
+
   // === 获取用户画像（含偏好）用于强化注入 ===
-  // 闲聊/打招呼场景不注入偏好，避免主动推荐
+  // 闲聊/打招呼场景和车控场景不注入偏好，避免主动推荐
   let userProfileSection = "";
-  if (context?.userId && !isChitchat) {
+  if (context?.userId && !isChitchat && !isVehicleControl) {
     try {
       const userId = parseInt(context.userId, 10);
       if (!isNaN(userId) && userId > 0) {
@@ -236,8 +251,14 @@ ${agentOutput}
   let summaryRequest = `用户原始请求: ${userText}\n\n`;
 
   // 注入记忆上下文
+  // 车控/设备控制指令：记忆仅供参考，不强制要求 LLM 融入到回复中
   if (retrievedMemories && retrievedMemories.length > 0) {
-    summaryRequest += `相关记忆（请在回复中参考）:\n${retrievedMemories.join("\n")}\n\n`;
+    if (isVehicleControl) {
+      // 车控场景下记忆仅供参考，不强制融入
+      summaryRequest += `用户记忆（仅当用户明确询问个人信息时才可参考，车控操作无需融入）:\n${retrievedMemories.join("\n")}\n\n`;
+    } else {
+      summaryRequest += `相关记忆（请在回复中参考）:\n${retrievedMemories.join("\n")}\n\n`;
+    }
   }
 
   // 注入用户画像偏好（强化）

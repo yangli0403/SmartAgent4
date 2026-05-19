@@ -186,6 +186,31 @@ export const NAV_EXPLICIT_PATTERNS: RegExp[] = [
 export const MUSIC_ACTION_PATTERNS: RegExp[] = [
   /^(播放|放|来一首|搜索|搜|找).{0,12}(歌|音乐|歌曲|歌手|专辑|歌词)/,
 ];
+/**
+ * 车控/座舱控制类正则：命中后优先路由到 multimedia 域（vehicleAgent 不存在时）
+ * 或直接标记为 vehicle_control 域。
+ *
+ * 设计说明：
+ * - 空调、大灯、车窗、座椅、白噪音（车内环境音）等均属于车控范畴
+ * - 当指令同时包含车控词和"放/播放"时，应优先识别为车控，而非音乐播放
+ * - 此规则在 MUSIC_ACTION_PATTERNS 之前检查，防止"放白噪音"被误判为音乐
+ */
+export const VEHICLE_CONTROL_PATTERNS: RegExp[] = [
+  // 空调相关
+  /空调.{0,10}(\d+度|制冷|制热|关|开|调|温度|风速)/,
+  /(调|设置|开|关).{0,6}空调/,
+  // 灯光相关
+  /(开|关|调).{0,6}(大灯|车灯|氛围灯|内饰灯|远光|近光)/,
+  /(大灯|车灯).{0,6}(开|关|调)/,
+  // 车窗相关
+  /(开|关|升|降).{0,6}(车窗|窗户|天窗)/,
+  // 座椅相关
+  /(调|升|降|前移|后移).{0,6}(座椅|椅背|靠背)/,
+  // 白噪音/环境音（车内场景）
+  /(放|播放|开).{0,6}(白噪音|雨声|自然音|环境音|睡眠音乐)/,
+  // 组合车控指令（包含两个及以上车控词）
+  /(?=.*(?:空调|大灯|车窗|座椅|白噪音|雨声))(?=.*(?:空调|大灯|车窗|座椅|白噪音|雨声|关|开|调)).{0,80}/,
+];
 // ==================== 字符 N-gram 与 TF-IDF ====================
 /**
  * 抽取字符 N-gram。
@@ -329,11 +354,15 @@ export function guardDomain(query: string): string | null {
   if (MEMORY_GUARD_PATTERNS.some((p) => p.test(query))) {
     const explicitNav = NAV_EXPLICIT_PATTERNS.some((p) => p.test(query));
     const memoryRef = /(昨晚|上次|之前|记得|说过|那条)/.test(query);
-    const prefRef = /按我的|根据我的|偏好|喜好/.test(query);
+    const prefRef = /按我的|根据我的|我的(喜好|偏好|习惯)|适合我的/.test(query);
     if (explicitNav && !memoryRef && !prefRef) {
       return null;
     }
     return "general";
+  }
+  // 车控指令优先于音乐播放检查，防止"放白噪音"等车内环境音被误判为 multimedia
+  if (VEHICLE_CONTROL_PATTERNS.some((p) => p.test(query))) {
+    return "vehicle_control";
   }
   if (MUSIC_ACTION_PATTERNS.some((p) => p.test(query))) {
     return "multimedia";

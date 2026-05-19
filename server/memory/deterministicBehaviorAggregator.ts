@@ -138,7 +138,7 @@ function inferTextOnlyVehicleActions(userText: string): SceneAction[] {
   const mentionsVehicleControl =
     /(空调|温度调|调到\d{1,2}\s*度|车灯|大灯|灯光|白噪音|座椅|车窗|天窗)/.test(t);
   const hasActionVerb =
-    /(打开|开启|关闭|调到|调至|调整|调高|调低|增加|降低|播放|来点|来一点|放点|放一点)/.test(t);
+    /(打开|开启|关闭|调到|调至|调整|调高|调低|增加|降低|播放|来点|来一点|放点|放一点|开|关|放|升|降|调)/.test(t);
   if (!mentionsVehicleControl || !hasActionVerb) return [];
 
   const actions: SceneAction[] = [];
@@ -160,8 +160,8 @@ function inferTextOnlyVehicleActions(userText: string): SceneAction[] {
     const args: Record<string, unknown> = {};
     if (/车外大灯|外部灯|车外灯/.test(t)) args.target = "exterior";
     if (/车内灯|阅读灯|氛围灯/.test(t)) args.target = "interior";
-    const off = /(关闭|关掉).{0,8}(车灯|大灯|灯光)|(?:车灯|大灯|灯光).{0,8}(关闭|关掉)/.test(t);
-    const on = /(打开|开启).{0,8}(车灯|大灯|灯光)|(?:车灯|大灯|灯光).{0,8}(打开|开启)/.test(t);
+    const off = /(关闭|关掉|关).{0,8}(车灯|大灯|灯光)|(?:车灯|大灯|灯光).{0,8}(关闭|关掉|关)/.test(t);
+    const on = /(打开|开启|开).{0,8}(车灯|大灯|灯光)|(?:车灯|大灯|灯光).{0,8}(打开|开启|开)/.test(t);
     actions.push({
       tool: "text_vehicle_lights",
       command: off ? "off" : on ? "on" : "set",

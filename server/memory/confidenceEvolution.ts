@@ -6,7 +6,8 @@
  * - 内容矛盾：降低已有记忆的置信度，继续写入新记忆
  *
  * 基于 versionGroup 匹配 + 语义相似度判断内容一致性。
- * 人格类型（persona kind）记忆不参与动态演化。
+ * 人格类型（persona kind）中的 preference 子类型参与演化以实现去重；
+ * 纯身份信息（type=identity 或无 type）仍跳过演化。
  *
  * @module confidenceEvolution
  */
@@ -153,6 +154,7 @@ export async function evolveConfidence(
   newMemory: {
     content: string;
     kind?: string;
+    type?: string;
     versionGroup?: string;
     userId: number;
   },
@@ -164,11 +166,12 @@ export async function evolveConfidence(
     ...config,
   };
 
-  // 1. 人格记忆不参与演化
-  if (newMemory.kind === "persona") {
+  // 1. 人格记忆中的 preference 子类型需要参与演化以实现去重；
+  //    纯身份信息（type 为 identity 或未指定）仍跳过演化，避免误合并。
+  if (newMemory.kind === "persona" && newMemory.type !== "preference") {
     return {
       action: "SKIP",
-      reason: "人格类型记忆不参与 Confidence 动态演化",
+      reason: "人格类型（非偏好子类）记忆不参与 Confidence 动态演化",
     };
   }
 

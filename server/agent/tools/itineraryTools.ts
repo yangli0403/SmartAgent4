@@ -276,6 +276,69 @@ async function amapTransitDuration(
   return amapDrivingDuration(origin, destination);
 }
 
+// ==================== 路程缓存（减少重复驾车 API 调用）====================
+
+interface TransitCacheEntry {
+  result: TransitResult;
+  expireAt: number;
+}
+
+/** 内存 TTL 缓存：以 "origin|dest" 为 key，缓存 30 分钟 */
+const transitCache = new Map<string, TransitCacheEntry>();
+const TRANSIT_CACHE_TTL_MS = 30 * 60 * 1000;
+
+function getTransitCacheKey(origin: string, destination: string): string {
+  return `${origin}|${destination}`;
+}
+
+async function amapDrivingDurationCached(
+  origin: string,
+  destination: string
+): Promise<TransitResult> {
+  if (!origin || !destination || origin === destination) {
+    return { durationMin: 0, description: "就地" };
+  }
+  const key = getTransitCacheKey(origin, destination);
+  const cached = transitCache.get(key);
+  if (cached && cached.expireAt > Date.now()) {
+    return cached.result;
+  }
+  const result = await amapDrivingDuration(origin, destination);
+  transitCache.set(key, { result, expireAt: Date.now() + TRANSIT_CACHE_TTL_MS });
+  return result;
+}
+
+/**
+ * 批量并发预取路程耗时，将结果写入缓存。
+ * 在行程生成前一次性并发请求所有需要的 origin→dest 对，
+ * 后续从缓存读取无需再等待。
+ */
+async function prefetchTransitDurations(
+  pairs: Array<{ origin: string; destination: string }>
+): Promise<void> {
+  const uncached = pairs.filter(({ origin, destination }) => {
+    if (!origin || !destination || origin === destination) return false;
+    const key = getTransitCacheKey(origin, destination);
+    const cached = transitCache.get(key);
+    return !cached || cached.expireAt <= Date.now();
+  });
+
+  if (uncached.length === 0) return;
+
+  console.log(`[ItineraryTools] Prefetching ${uncached.length} transit durations in parallel...`);
+  const startTime = Date.now();
+
+  await Promise.allSettled(
+    uncached.map(async ({ origin, destination }) => {
+      const result = await amapDrivingDuration(origin, destination);
+      const key = getTransitCacheKey(origin, destination);
+      transitCache.set(key, { result, expireAt: Date.now() + TRANSIT_CACHE_TTL_MS });
+    })
+  );
+
+  console.log(`[ItineraryTools] Prefetch completed in ${Date.now() - startTime}ms`);
+}
+
 // ==================== 时间工具 ====================
 
 function parseTime(timeStr: string): number {
@@ -350,10 +413,41 @@ async function generateRealItinerary(
     }
   }
 
+  // 3.5 预取所有路程耗时（并发，显著减少总耗时）
+  const hotel = hotels[0] || { name: `${destination}酒店`, address: destination, location: cityCenter };
+  {
+    const allPOIs = [
+      ...filteredAttractions.slice(0, days * 4),
+      ...restaurants.slice(0, days * 2 + 1),
+      ...(breakfastPlaces.length > 0 ? breakfastPlaces.slice(0, days) : []),
+      hotel,
+    ].filter((p) => p.location);
+    const hotelLoc = hotel.location || cityCenter;
+    const prefetchPairs: Array<{ origin: string; destination: string }> = [];
+    for (const poi of allPOIs) {
+      if (poi.location && poi.location !== hotelLoc) {
+        prefetchPairs.push({ origin: hotelLoc, destination: poi.location });
+        prefetchPairs.push({ origin: poi.location, destination: hotelLoc });
+      }
+    }
+    for (let i = 0; i < allPOIs.length; i++) {
+      for (let j = i + 1; j < allPOIs.length; j++) {
+        const a = allPOIs[i];
+        const b = allPOIs[j];
+        if (a.location && b.location && a.location !== b.location) {
+          prefetchPairs.push({ origin: a.location, destination: b.location });
+        }
+      }
+    }
+    const uniquePairs = Array.from(
+      new Map(prefetchPairs.map((p) => [`${p.origin}|${p.destination}`, p])).values()
+    );
+    await prefetchTransitDurations(uniquePairs);
+  }
+
   // 4. 构建每日行程
   const wakeMin = parseTime(wakeUpTime);
   const sleepMin = parseTime(sleepTime);
-  const hotel = hotels[0] || { name: `${destination}酒店`, address: destination, location: cityCenter };
 
   const allDays: ItineraryDay[] = [];
   let attractionIdx = 0;
@@ -390,7 +484,7 @@ async function generateRealItinerary(
     const bfPlace = breakfastPlaces[d % breakfastPlaces.length] || { name: "酒店早餐", address: hotel.address || destination, location: hotel.location || cityCenter };
     let bfTransit: TransitResult = { durationMin: 0, description: "酒店内" };
     if (bfPlace.location && currentLocation && bfPlace.location !== currentLocation) {
-      bfTransit = await amapDrivingDuration(currentLocation, bfPlace.location);
+      bfTransit = await amapDrivingDurationCached(currentLocation, bfPlace.location);
       if (bfTransit.durationMin > 3) {
         stops.push({
           id: `d${d + 1}_s${stopCounter++}`,
@@ -429,7 +523,7 @@ async function generateRealItinerary(
       if (!attr.location) continue;
 
       // 交通
-      const transit = await amapDrivingDuration(currentLocation, attr.location);
+      const transit = await amapDrivingDurationCached(currentLocation, attr.location);
       if (transit.durationMin > 3) {
         stops.push({
           id: `d${d + 1}_s${stopCounter++}`,
@@ -467,7 +561,7 @@ async function generateRealItinerary(
     // 午餐
     const lunchPlace = restaurants[restaurantIdx++ % Math.max(restaurants.length, 1)] || { name: `${destination}餐厅`, address: destination, location: currentLocation };
     if (lunchPlace.location && currentLocation) {
-      const lunchTransit = await amapDrivingDuration(currentLocation, lunchPlace.location);
+      const lunchTransit = await amapDrivingDurationCached(currentLocation, lunchPlace.location);
       if (lunchTransit.durationMin > 3) {
         stops.push({
           id: `d${d + 1}_s${stopCounter++}`,
@@ -505,7 +599,7 @@ async function generateRealItinerary(
       const attr = filteredAttractions[attractionIdx++];
       if (!attr.location) continue;
 
-      const transit = await amapDrivingDuration(currentLocation, attr.location);
+      const transit = await amapDrivingDurationCached(currentLocation, attr.location);
       if (transit.durationMin > 3) {
         stops.push({
           id: `d${d + 1}_s${stopCounter++}`,
@@ -542,7 +636,7 @@ async function generateRealItinerary(
     // 晚餐
     const dinnerPlace = restaurants[restaurantIdx++ % Math.max(restaurants.length, 1)] || { name: `${destination}晚餐`, address: destination, location: currentLocation };
     if (dinnerPlace.location && currentLocation) {
-      const dinnerTransit = await amapDrivingDuration(currentLocation, dinnerPlace.location);
+      const dinnerTransit = await amapDrivingDurationCached(currentLocation, dinnerPlace.location);
       if (dinnerTransit.durationMin > 3) {
         stops.push({
           id: `d${d + 1}_s${stopCounter++}`,
@@ -577,7 +671,7 @@ async function generateRealItinerary(
 
     // 返回酒店
     if (hotel.location && currentLocation && hotel.location !== currentLocation) {
-      const hotelTransit = await amapDrivingDuration(currentLocation, hotel.location);
+      const hotelTransit = await amapDrivingDurationCached(currentLocation, hotel.location);
       if (hotelTransit.durationMin > 3) {
         stops.push({
           id: `d${d + 1}_s${stopCounter++}`,

@@ -26,6 +26,7 @@ import type {
 import type { DomainAgentInterface, AgentExecutionInput } from "../domains/types";
 import { HumanMessage } from "@langchain/core/messages";
 import { traceable } from "langsmith/traceable";
+import { recordDeterministicActionPatterns } from "../../memory/deterministicBehaviorAggregator";
 
 // ==================== DAG 分析器 ====================
 
@@ -269,7 +270,7 @@ const executeStep = traceable(
     );
     const output = await agent.execute(input);
 
-    return {
+    const result: StepResult = {
       stepId: step.id,
       status: output.success ? "success" : "error",
       output: output.output,
@@ -277,6 +278,26 @@ const executeStep = traceable(
       durationMs: Date.now() - startTime,
       toolCalls: output.toolCalls,
     };
+
+    // 5. 成功执行后，异步记录确定性行为模式（补齐串行引擎中的逻辑，用于主动推荐触发）
+    if (output.success) {
+      const numericUserId = context?.userId ? parseInt(context.userId, 10) : NaN;
+      if (!Number.isNaN(numericUserId)) {
+        recordDeterministicActionPatterns({
+          userId: numericUserId,
+          userText: userMessage,
+          step,
+          result,
+        }).catch((e) =>
+          console.warn(
+            "[ParallelExecuteEngine] deterministic behavior aggregation failed:",
+            (e as Error).message
+          )
+        );
+      }
+    }
+
+    return result;
   } catch (error) {
     return {
       stepId: step.id,
