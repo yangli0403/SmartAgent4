@@ -7,11 +7,11 @@
  * 触发时机：每次 runSupervisorStreaming 完成后异步检查。
  * 推送方式：publishSupervisorEvent → SSE → 前端 proactive_suggest 事件。
  *
- * P2 优化：
- * - 原 alreadySuggested 为进程内 Set，重启后清空，但正常运行时同一模式只推送一次。
- *   改为数据库持久化标记（behavior_patterns.confidence >= 0.99 作为"已推送"标志），
- *   保证跨重启不重复推送，同时重启后也不会因 Set 清空而漏推。
- * - 增加详细日志，便于调试链路。
+ * v0.5.1 修复：
+ * - 原逻辑在 SSE 推送前就标记 confidence=0.99（"已推送"），如果前端未建立 SSE 连接
+ *   （如认证失败、网络断开），该模式就永远不会再推送了。
+ * - 修改为：先检查 SSE 是否有活跃订阅者，推送成功后才标记为"已推送"。
+ * - 如果没有活跃订阅者，不标记，下次请求时会重新尝试推送。
  */
 
 import { eq, gte, and, lt } from "drizzle-orm";
@@ -19,6 +19,7 @@ import { getDb } from "../db";
 import { behaviorPatterns } from "../../drizzle/schema";
 import { callLLMText } from "../llm/langchainAdapter";
 import { publishSupervisorEvent } from "../agent/supervisor/supervisorEventBus";
+import { supervisorEventBus } from "../agent/supervisor/supervisorEventBus";
 
 /** 已推送标记的 confidence 阈值（写入 DB，跨重启持久化） */
 const SUGGESTED_CONFIDENCE_MARKER = 0.99;
@@ -40,6 +41,15 @@ export async function checkAndPublishProactiveSuggestion(
     console.log(
       `[ProactiveSuggestion] 检查用户 ${userId} 的高频行为模式 (requestId=${requestId})`
     );
+
+    // 前置检查：当前 requestId 是否有活跃的 SSE 订阅者
+    // 如果没有（前端未连接 SSE），推送也没有意义，跳过本次检查（不标记，下次重试）
+    if (!supervisorEventBus.hasSubscribers(requestId)) {
+      console.log(
+        `[ProactiveSuggestion] requestId=${requestId} 无活跃 SSE 订阅者，跳过（下次重试）`
+      );
+      return;
+    }
 
     // 查找 frequency >= 3 且尚未推送过建议的行为模式
     // "尚未推送"的判断：confidence < SUGGESTED_CONFIDENCE_MARKER（DB 持久化标记）
@@ -63,12 +73,6 @@ export async function checkAndPublishProactiveSuggestion(
 
     // 取频率最高的那条
     const topPattern = highFreqPatterns.sort((a, b) => b.frequency - a.frequency)[0];
-
-    // 立即写入 DB 标记为"已推送"，防止并发重复推送
-    await db
-      .update(behaviorPatterns)
-      .set({ confidence: SUGGESTED_CONFIDENCE_MARKER })
-      .where(eq(behaviorPatterns.id, topPattern.id));
 
     console.log(
       `[ProactiveSuggestion] 检测到高频行为模式 #${topPattern.id}: ` +
@@ -114,6 +118,14 @@ export async function checkAndPublishProactiveSuggestion(
       console.warn("[ProactiveSuggestion] LLM JSON 解析失败，使用默认值");
     }
 
+    // 推送前再次检查 SSE 订阅者是否仍然存在（LLM 调用期间前端可能已断开）
+    if (!supervisorEventBus.hasSubscribers(requestId)) {
+      console.log(
+        `[ProactiveSuggestion] LLM 生成完成但 SSE 已断开，不标记已推送（下次重试）`
+      );
+      return;
+    }
+
     // 通过 SSE 推送主动建议事件
     publishSupervisorEvent({
       requestId,
@@ -129,8 +141,14 @@ export async function checkAndPublishProactiveSuggestion(
       },
     });
 
+    // 推送成功后才标记为"已推送"（避免前端未收到但 DB 已标记的问题）
+    await db
+      .update(behaviorPatterns)
+      .set({ confidence: SUGGESTED_CONFIDENCE_MARKER })
+      .where(eq(behaviorPatterns.id, topPattern.id));
+
     console.log(
-      `[ProactiveSuggestion] 已推送建议: 「${sceneName}」(${suggestedSteps.length} 步骤)`
+      `[ProactiveSuggestion] 已推送建议: 「${sceneName}」(${suggestedSteps.length} 步骤) → 已标记 confidence=${SUGGESTED_CONFIDENCE_MARKER}`
     );
   } catch (error) {
     // 主动建议是非关键路径，失败不影响主流程

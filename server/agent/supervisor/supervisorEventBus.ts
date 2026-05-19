@@ -46,6 +46,12 @@ class SupervisorEventBus extends EventEmitter {
     this.emit(channel, env);
   }
 
+  /** 检查指定 requestId 是否有活跃的 SSE 订阅者 */
+  hasSubscribers(requestId: string): boolean {
+    const channel = SupervisorEventBus.channelOf(requestId);
+    return this.listenerCount(channel) > 0;
+  }
+
   static channelOf(requestId: string): string {
     return `supervisor:${requestId}`;
   }
