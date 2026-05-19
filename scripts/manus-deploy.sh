@@ -38,6 +38,14 @@ JWT_SECRET="${JWT_SECRET:-manus-sandbox-test-secret-key-2026}"
 # LLM 配置：优先使用沙箱预设的环境变量
 LLM_API_KEY="${OPENAI_API_KEY:-sk-placeholder}"
 LLM_BASE_URL="${OPENAI_BASE_URL:-https://api.openai.com/v1}"
+LLM_MODEL="${OPENAI_DEFAULT_MODEL:-deepseek-v4-flash}"
+
+# 其他 API Keys
+DASHSCOPE_API_KEY_VAL="${DASHSCOPE_API_KEY:-}"
+NEWSDATA_API_KEY_VAL="${NEWSDATA_API_KEY:-}"
+AMAP_API_KEY_VAL="${AMAP_API_KEY:-}"
+FEISHU_APP_ID_VAL="${FEISHU_APP_ID:-}"
+FEISHU_APP_SECRET_VAL="${FEISHU_APP_SECRET:-}"
 
 # ============================================================
 # 项目根目录
@@ -117,19 +125,21 @@ DATABASE_URL=postgresql://${DB_USER}:${DB_PASS}@localhost:${DB_PORT}/${DB_NAME}
 # JWT 密钥
 JWT_SECRET=${JWT_SECRET}
 
-# LLM 配置
+# LLM 配置（阿里百炼 DeepSeek）
 OPENAI_API_KEY=${LLM_API_KEY}
 OPENAI_BASE_URL=${LLM_BASE_URL}
+OPENAI_MODEL=${LLM_MODEL}
+OPENAI_DEFAULT_MODEL=${LLM_MODEL}
 
 # 认证配置 — 跳过 OAuth（沙箱测试模式）
 SKIP_AUTH=true
 VITE_SKIP_OAUTH=true
 
 # Emotions-System（禁用，沙箱中无此微服务）
-EMOTIONS_SYSTEM_ENABLED=false
+EMOTIONS_SYSTEM_ENABLED=true
 
-# DashScope（留空，Omni 模式将返回 501）
-DASHSCOPE_API_KEY=
+# DashScope（百炼 API Key）
+DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY_VAL}
 
 # LangSmith（禁用）
 LANGSMITH_TRACING=false
@@ -140,6 +150,16 @@ NODE_ENV=development
 
 # 默认人格
 DEFAULT_CHARACTER_ID=xiaozhi
+
+# 新闻数据
+NEWSDATA_API_KEY=${NEWSDATA_API_KEY_VAL}
+
+# 高德地图
+AMAP_API_KEY=${AMAP_API_KEY_VAL}
+
+# 飞书 officeAgent
+FEISHU_APP_ID=${FEISHU_APP_ID_VAL}
+FEISHU_APP_SECRET=${FEISHU_APP_SECRET_VAL}
 EOF
 
 log_info ".env 文件已生成"
@@ -170,4 +190,25 @@ log_info "  部署完成！正在启动开发服务器..."
 log_info "  访问地址: http://localhost:${APP_PORT}"
 log_info "========================================"
 
-exec pnpm dev
+# ============================================================
+# 注意：必须通过 env 命令将关键变量注入到进程环境中
+# 原因：ESM 模块中的模块级常量（如 SKIP_AUTH）在 dotenv.config 执行之前就被评估
+#       如果这些变量只在 .env 中而不在进程环境中，模块加载时会读取到 undefined
+# ============================================================
+exec env \
+  SKIP_AUTH=true \
+  VITE_SKIP_OAUTH=true \
+  DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@localhost:${DB_PORT}/${DB_NAME}" \
+  JWT_SECRET="${JWT_SECRET}" \
+  OPENAI_API_KEY="${LLM_API_KEY}" \
+  OPENAI_BASE_URL="${LLM_BASE_URL}" \
+  OPENAI_MODEL="${LLM_MODEL}" \
+  OPENAI_DEFAULT_MODEL="${LLM_MODEL}" \
+  DASHSCOPE_API_KEY="${DASHSCOPE_API_KEY_VAL}" \
+  NEWSDATA_API_KEY="${NEWSDATA_API_KEY_VAL}" \
+  AMAP_API_KEY="${AMAP_API_KEY_VAL}" \
+  FEISHU_APP_ID="${FEISHU_APP_ID_VAL}" \
+  FEISHU_APP_SECRET="${FEISHU_APP_SECRET_VAL}" \
+  NODE_ENV=development \
+  PORT="${APP_PORT}" \
+  pnpm dev

@@ -127,3 +127,6 @@ local-voice-service/
 
 # Windows bat scripts (machine-specific)
 start-local-voice.bat
+
+# 磁盘缓存数据（运行时生成，不应提交）
+server/cache/data/
