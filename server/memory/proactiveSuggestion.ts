@@ -6,16 +6,22 @@
  *
  * 触发时机：每次 runSupervisorStreaming 完成后异步检查。
  * 推送方式：publishSupervisorEvent → SSE → 前端 proactive_suggest 事件。
+ *
+ * P2 优化：
+ * - 原 alreadySuggested 为进程内 Set，重启后清空，但正常运行时同一模式只推送一次。
+ *   改为数据库持久化标记（behavior_patterns.confidence >= 0.99 作为"已推送"标志），
+ *   保证跨重启不重复推送，同时重启后也不会因 Set 清空而漏推。
+ * - 增加详细日志，便于调试链路。
  */
 
-import { eq, gte, and } from "drizzle-orm";
+import { eq, gte, and, lt } from "drizzle-orm";
 import { getDb } from "../db";
 import { behaviorPatterns } from "../../drizzle/schema";
 import { callLLMText } from "../llm/langchainAdapter";
 import { publishSupervisorEvent } from "../agent/supervisor/supervisorEventBus";
 
-/** 已推送过建议的模式 ID 集合（进程内去重，避免同一模式重复推送） */
-const alreadySuggested = new Set<number>();
+/** 已推送标记的 confidence 阈值（写入 DB，跨重启持久化） */
+const SUGGESTED_CONFIDENCE_MARKER = 0.99;
 
 /**
  * 检查用户是否有高频行为模式（frequency >= 3），若有则生成并推送场景命名建议。
@@ -31,31 +37,38 @@ export async function checkAndPublishProactiveSuggestion(
     const db = await getDb();
     if (!db) return;
 
-    // 查找 frequency >= 3 且尚未建议过的行为模式
+    console.log(
+      `[ProactiveSuggestion] 检查用户 ${userId} 的高频行为模式 (requestId=${requestId})`
+    );
+
+    // 查找 frequency >= 3 且尚未推送过建议的行为模式
+    // "尚未推送"的判断：confidence < SUGGESTED_CONFIDENCE_MARKER（DB 持久化标记）
     const highFreqPatterns = await db
       .select()
       .from(behaviorPatterns)
       .where(
         and(
           eq(behaviorPatterns.userId, userId),
-          gte(behaviorPatterns.frequency, 3)
+          gte(behaviorPatterns.frequency, 3),
+          lt(behaviorPatterns.confidence, SUGGESTED_CONFIDENCE_MARKER)
         )
       )
       .limit(5);
 
+    console.log(
+      `[ProactiveSuggestion] 找到 ${highFreqPatterns.length} 条未推送的高频模式`
+    );
+
     if (highFreqPatterns.length === 0) return;
 
-    // 找出尚未推送过建议的模式
-    const unnotified = highFreqPatterns.filter(
-      (p) => !alreadySuggested.has(p.id)
-    );
-    if (unnotified.length === 0) return;
-
     // 取频率最高的那条
-    const topPattern = unnotified.sort((a, b) => b.frequency - a.frequency)[0];
+    const topPattern = highFreqPatterns.sort((a, b) => b.frequency - a.frequency)[0];
 
-    // 标记为已建议（进程内去重）
-    alreadySuggested.add(topPattern.id);
+    // 立即写入 DB 标记为"已推送"，防止并发重复推送
+    await db
+      .update(behaviorPatterns)
+      .set({ confidence: SUGGESTED_CONFIDENCE_MARKER })
+      .where(eq(behaviorPatterns.id, topPattern.id));
 
     console.log(
       `[ProactiveSuggestion] 检测到高频行为模式 #${topPattern.id}: ` +

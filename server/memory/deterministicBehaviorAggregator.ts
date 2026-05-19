@@ -30,10 +30,37 @@ const VEHICLE_TOOL_HINTS = [
 ];
 
 /**
+ * 非车控工具名称前缀集合，这些工具调用不应参与车控签名生成。
+ * 当 toolCalls 全部为此类工具时，视为"无真实车控工具调用"，
+ * 回退到文本解析路径以生成稳定签名。
+ */
+const NON_VEHICLE_TOOL_PREFIXES = [
+  "memory_",
+  "search",
+  "get_song",
+  "get_lyric",
+  "get_playlist",
+  "get_album",
+  "get_artist",
+  "get_unblocked",
+];
+
+/**
+ * 判断一个工具调用是否属于"非车控辅助工具"（memory_store、search 等）
+ */
+function isNonVehicleTool(call: ToolCallRecord): boolean {
+  const name = (call.toolName || call.serverId || "").toLowerCase();
+  return NON_VEHICLE_TOOL_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+/**
  * P1 修复：不再等待 10 轮 LLM 行为检测，也不依赖自由文本 memories。
  * 对车控、灯光、空调、座椅、音乐/白噪音等可执行工具调用生成确定性签名，
  * 每次成功执行后直接累计 behavior_patterns.frequency；达到 3 次时立即可被主动建议链路命中，
- * 同时补写 scene_episode + actions，保证“记录为 X 模式/下次叫 X”类场景可复用、可执行。
+ * 同时补写 scene_episode + actions，保证"记录为 X 模式/下次叫 X"类场景可复用、可执行。
+ *
+ * P2 优化：当 toolCalls 全部为 memory 类或 search 等非车控辅助工具时（即没有真实车控工具），
+ * 优先走文本解析路径（inferTextOnlyVehicleActions），保证签名稳定、frequency 可正确累积。
  */
 export async function recordDeterministicActionPatterns(
   input: DeterministicPatternInput
@@ -45,17 +72,30 @@ export async function recordDeterministicActionPatterns(
   let domain: SceneDomain | null = null;
   let actions: SceneAction[] = [];
 
-  if (toolCalls.length > 0) {
-    domain = inferSceneDomain(step.targetAgent, toolCalls, userText);
+  // 过滤出真实的车控/业务工具调用（排除 memory_* 等辅助工具）
+  const vehicleToolCalls = toolCalls.filter((call) => !isNonVehicleTool(call));
+
+  if (vehicleToolCalls.length > 0) {
+    // 有真实业务工具调用：走工具签名路径
+    domain = inferSceneDomain(step.targetAgent, vehicleToolCalls, userText);
     if (!domain) return;
 
-    actions = toolCalls
+    actions = vehicleToolCalls
       .filter((call) => call.status !== "error")
       .map(toolCallToSceneAction)
       .filter((a): a is SceneAction => Boolean(a));
   } else {
+    // 无真实车控工具调用（全为辅助工具或 0 tool calls）：
+    // 优先走文本解析路径，生成稳定的确定性签名
     actions = inferTextOnlyVehicleActions(userText);
     domain = actions.length > 0 ? "vehicle_control" : null;
+
+    if (domain) {
+      console.log(
+        `[DeterministicBehaviorAggregator] 无真实车控工具调用，走文本解析路径: ` +
+          `"${userText.slice(0, 60)}" → ${actions.length} actions`
+      );
+    }
   }
 
   if (!domain || actions.length === 0) return;
@@ -82,6 +122,11 @@ export async function recordDeterministicActionPatterns(
   const now = new Date();
   const nextFrequency = existing[0] ? existing[0].frequency + 1 : 1;
 
+  console.log(
+    `[DeterministicBehaviorAggregator] 行为模式 ${patternType} ` +
+      `frequency: ${existing[0]?.frequency ?? 0} → ${nextFrequency}`
+  );
+
   if (existing[0]) {
     await db
       .update(behaviorPatterns)
@@ -107,6 +152,9 @@ export async function recordDeterministicActionPatterns(
   }
 
   if (nextFrequency >= 3) {
+    console.log(
+      `[DeterministicBehaviorAggregator] frequency >= 3，触发 persistSceneEpisode: ${patternType}`
+    );
     await persistSceneEpisode({
       userId,
       domain,
@@ -265,7 +313,7 @@ function buildPatternDescription(domain: SceneDomain, actions: SceneAction[], us
     .map((a) => `${a.tool}:${a.command}${a.args ? ` ${JSON.stringify(a.args)}` : ""}`)
     .join("；");
   const domainText = domain === "vehicle_control" ? "车控" : domain;
-  return `用户多次执行相同${domainText}操作：${actionText}${userText ? `。最近表达：“${userText.slice(0, 80)}”` : ""}`;
+  return `用户多次执行相同${domainText}操作：${actionText}${userText ? `。最近表达："${userText.slice(0, 80)}"` : ""}`;
 }
 
 function suggestSceneName(domain: SceneDomain, actions: SceneAction[]): string {

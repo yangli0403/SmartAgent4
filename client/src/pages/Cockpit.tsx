@@ -345,6 +345,8 @@ export default function Cockpit() {
   // ==================== 主动建议卡片状态 ====================
   const [proactiveSuggestion, setProactiveSuggestion] = useState<ProactiveSuggestion | null>(null);
   const [proactiveDismissed, setProactiveDismissed] = useState<Set<string>>(new Set());
+  const [proactiveEditingName, setProactiveEditingName] = useState<string>("");
+  const [proactiveNameEditing, setProactiveNameEditing] = useState(false);
   // 监听主动建议事件
   useEffect(() => {
     if (!supervisorStream.proactiveSuggestion) return;
@@ -352,6 +354,8 @@ export default function Cockpit() {
     // 避免重复弹出同一 requestId 的建议
     if (proactiveDismissed.has(suggestion.requestId)) return;
     setProactiveSuggestion(suggestion);
+    setProactiveEditingName(suggestion.suggestedSceneName);
+    setProactiveNameEditing(false);
   }, [supervisorStream.proactiveSuggestion]);
 
   // ==================== AIRI 出场音效（仅首次模型加载完成时播放）====================
@@ -1013,7 +1017,33 @@ export default function Cockpit() {
               <p className="text-white/60 text-xs mt-0.5">{proactiveSuggestion.patternDescription}</p>
             </div>
           </div>
-          <p className="text-white/80 text-xs mb-3">要将此操作保存为场景「{proactiveSuggestion.suggestedSceneName}」吗？</p>
+          <div className="mb-3">
+            <p className="text-white/60 text-xs mb-1">要将此操作保存为以下场景吗？</p>
+            {proactiveNameEditing ? (
+              <div className="flex items-center gap-1">
+                <input
+                  autoFocus
+                  value={proactiveEditingName}
+                  onChange={e => setProactiveEditingName(e.target.value)}
+                  onBlur={() => setProactiveNameEditing(false)}
+                  onKeyDown={e => { if (e.key === 'Enter') setProactiveNameEditing(false); if (e.key === 'Escape') { setProactiveEditingName(proactiveSuggestion.suggestedSceneName); setProactiveNameEditing(false); } }}
+                  className="flex-1 text-sm bg-white/20 text-white border border-white/40 rounded px-2 py-0.5 outline-none focus:border-blue-400"
+                  placeholder="输入场景名称"
+                />
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <span className="text-white font-semibold text-sm">「{proactiveEditingName}」</span>
+                <button
+                  onClick={() => setProactiveNameEditing(true)}
+                  className="text-white/40 hover:text-yellow-300 text-xs border border-white/20 hover:border-yellow-300/50 rounded px-1.5 py-0.5 transition-colors"
+                  title="点击修改场景名称"
+                >
+                  改名
+                </button>
+              </div>
+            )}
+          </div>
           {proactiveSuggestion.suggestedSteps.length > 0 && (
             <ul className="text-white/60 text-xs mb-3 space-y-1">
               {proactiveSuggestion.suggestedSteps.map((step, i) => (
@@ -1025,7 +1055,7 @@ export default function Cockpit() {
             <button
               onClick={() => {
                 saveSuggestedSceneMutation.mutate({
-                  suggestedSceneName: proactiveSuggestion.suggestedSceneName,
+                  suggestedSceneName: proactiveEditingName.trim() || proactiveSuggestion.suggestedSceneName,
                   patternDescription: proactiveSuggestion.patternDescription,
                   patternType: proactiveSuggestion.patternType,
                   frequency: proactiveSuggestion.frequency,

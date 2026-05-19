@@ -31,6 +31,7 @@ import {
   canShortCircuit,
   correctIntent,
 } from "./intentSimilarity";
+import { searchSceneEpisodes } from "../../memory/sceneEpisode";
 
 /**
  * classifyNode �?LLM 系统提示词（静态降级版本）
@@ -628,8 +629,51 @@ export async function classifyNode(
 
   // 4. 获取动�?Prompt 并调�?LLM
   const classifyPrompt = getClassifyPrompt();
+  // V6 新增：场景名称快速匹配——用户说出已保存场景的名称时直接路由到 generalAgent 执行场景
+  // 例："打开午睡模式" "启动离车模式" "执行午睡场景"
+  const sceneActivationMatch = /^(?:打开|启动|执行|开启|运行|触发)?\s*(.{2,20}?)\s*(?:模式|场景|流程)?$/.exec(userText.trim());
+  if (sceneActivationMatch) {
+    const userId = state.context?.userId ? Number(state.context.userId) : 0;
+    if (userId > 0) {
+      try {
+        const sceneResults = await searchSceneEpisodes({ userId, query: userText.trim(), limit: 3 });
+        const matched = sceneResults.find((m) => {
+          const meta = (m.metadata ?? {}) as Record<string, unknown>;
+          const sceneName = String(meta.sceneName ?? "");
+          if (!sceneName) return false;
+          const t = userText.trim();
+          // 直接包含场景名称，或场景名称包含用户输入的核心词
+          return t.includes(sceneName) || sceneName.includes(sceneActivationMatch[1] ?? "");
+        });
+        if (matched) {
+          const meta = (matched.metadata ?? {}) as Record<string, unknown>;
+          console.log(`[ClassifyNode] Scene activation matched: "${meta.sceneName}" (memoryId=${matched.id}), routing to generalAgent`);
+          const sceneClassification: TaskClassification = {
+            domain: "general",
+            complexity: "simple",
+            reasoning: `[rule:scene_activation] 用户触发已保存场景「${meta.sceneName}」`,
+            requiredAgents: ["generalAgent"],
+          };
+          const scenePlan: PlanStep[] = [{
+            id: 1,
+            description: `执行已保存的场景「${meta.sceneName}」：${userText}。请先调用 memory_search 检索该场景的完整步骤（kind=episodic, type=behavior, query="${meta.sceneName}"），然后按步骤逐一向用户确认并执行。`,
+            targetAgent: "generalAgent",
+            expectedTools: ["memory_search"],
+            dependsOn: [],
+            inputMapping: {},
+          }];
+          return {
+            taskClassification: sceneClassification,
+            plan: scenePlan,
+          };
+        }
+      } catch (e) {
+        console.warn("[ClassifyNode] Scene activation search failed:", (e as Error).message);
+      }
+    }
+  }
 
-  // V4 新增：在调用 LLM 之前，尝试基于相似度进行“短路”补充
+  // V4 新增：在调用 LLM 之前，尝试基于相似度进行"短路"补充
   // 仅在极高置信度命中时生效，避免误警。
   const shortCircuit = canShortCircuit(userText);
   if (shortCircuit.ok && shortCircuit.domain && shortCircuit.agent) {
