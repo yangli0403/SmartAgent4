@@ -30,6 +30,14 @@ import { useStageStore } from "@/lib/airi-stage/useStageStore";
 import { EXPRESSION_MAPPING, getExpressionParams } from "@/lib/airi-stage/expressionMapping";
 import { MOTION_MAPPING, getMotionDef } from "@/lib/airi-stage/motionMapping";
 import type { StageEvent, IdleState } from "@/lib/airi-stage/types";
+import {
+  getParameterCombination,
+  hasParameterCombination,
+} from "@/lib/airi-stage/parameterCombinations";
+import {
+  ParameterAnimationEngine,
+  getGlobalParameterAnimationManager,
+} from "@/lib/airi-stage/parameterAnimationEngine";
 
 // CDN 模型地址（Haru - Cubism 4 官方示例模型）
 const MODEL_URL =
@@ -58,10 +66,12 @@ export default function AiriDemo() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<PIXI.Application | null>(null);
   const modelRef = useRef<any>(null);
+  const parameterAnimationEngineRef = useRef<ParameterAnimationEngine | null>(null);
 
   const [modelLoaded, setModelLoaded] = useState(false);
   const [modelLoading, setModelLoading] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
+  const [paramAnimationActive, setParamAnimationActive] = useState(false);
 
   // ===== 控制面板状态 =====
   const [intensity, setIntensity] = useState(1.0);
@@ -178,26 +188,68 @@ export default function AiriDemo() {
       const model = modelRef.current;
       if (!model) return;
 
-      const def = getMotionDef(event.motion);
-      if (!def) {
-        // 未知动作，尝试直接用 Idle/Tap 组
-        addLog("motion", `未知动作 "${event.motion}"，尝试播放 Tap[0]`);
-        try {
-          setCurrentMotion(event.motion, event.priority ?? 1);
-          await model.motion("Tap", 0);
-          finishMotion();
-        } catch {
-          finishMotion();
-        }
-        return;
-      }
+      const motionName = event.motion;
+      const def = getMotionDef(motionName);
+      
+      // 检查是否有参数驱动配置
+      const hasParamCombination = hasParameterCombination(motionName);
+      const paramCombination = hasParamCombination
+        ? getParameterCombination(motionName)
+        : null;
 
       try {
-        setCurrentMotion(event.motion, def.priority);
-        await model.motion(def.group, def.index, def.priority);
+        setCurrentMotion(motionName, event.priority ?? def?.priority ?? 1);
+        setParamAnimationActive(true);
+
+        // 应用参数驱动（如果存在）
+        if (paramCombination && model.internalModel?.coreModel) {
+          const coreModel = model.internalModel.coreModel;
+          
+          // 创建或获取参数动画引擎
+          if (!parameterAnimationEngineRef.current) {
+            parameterAnimationEngineRef.current = new ParameterAnimationEngine(
+              coreModel
+            );
+          }
+
+          const engine = parameterAnimationEngineRef.current;
+          
+          // 动画参数
+          engine.animateParameters(paramCombination.parameters, () => {
+            addLog(
+              "motion",
+              `参数驱动完成: ${motionName}`
+            );
+          });
+
+          addLog(
+            "motion",
+            `应用参数驱动: ${motionName} (${Object.keys(
+              paramCombination.parameters
+            ).join(", ")})`
+          );
+        }
+
+        // 播放 Motion（如果存在）
+        if (def) {
+          await model.motion(def.group, def.index, def.priority);
+        } else if (paramCombination?.motionFallback) {
+          await model.motion(
+            paramCombination.motionFallback.group,
+            paramCombination.motionFallback.index
+          );
+        } else {
+          // 未知动作，尝试直接用 Idle/Tap 组
+          addLog("motion", `未知动作 "${motionName}"，尝试播放 Tap[0]`);
+          await model.motion("Tap", 0);
+        }
+
         finishMotion();
-      } catch {
+      } catch (error) {
+        addLog("error", `动作执行失败: ${motionName} - ${error}`);
         finishMotion();
+      } finally {
+        setParamAnimationActive(false);
       }
     };
 
@@ -206,6 +258,7 @@ export default function AiriDemo() {
       stageEventBus.off("motion", onMotion);
     };
   }, [addLog, setCurrentMotion, finishMotion]);
+
 
   // ===== 口型驱动（监听 TTS 事件） =====
   useEffect(() => {
