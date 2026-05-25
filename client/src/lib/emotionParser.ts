@@ -67,6 +67,9 @@ const ANIMATION_MAP: Record<string, { emoji: string; label: string }> = {
   head_tilt: { emoji: "🤨", label: "歪头" },
   bow: { emoji: "🙇", label: "鞠躬" },
   shake_head: { emoji: "🙅", label: "摇头" },
+  thinking: { emoji: "🤔", label: "托腮思考" },
+  surprised: { emoji: "😲", label: "夸张惊讶" },
+  excited: { emoji: "🤩", label: "兴奋摇摆" },
 };
 
 const GESTURE_MAP: Record<string, { emoji: string; label: string }> = {

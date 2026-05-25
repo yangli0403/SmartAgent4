@@ -207,6 +207,118 @@ export const PARAMETER_COMBINATIONS: Record<string, ParameterCombinationConfig> 
     motionFallback: { group: "Tap", index: 0 },
   },
 
+  // ==================== 新增：思考/惊讶/兴奋 ====================
+
+  /**
+   * 托腮思考
+   * 头部低垂偏侧 + 眼球上转，经典"思考眼"姿态
+   * 触发词：你在想什么 / 让我想想 / 思考一下
+   */
+  thinking: {
+    description: "托腮思考 - 头低垂偏侧，眼球上转",
+    totalDuration: 800,
+    parameters: {
+      // 头部微微低下
+      ParamAngleX: {
+        target: 12,
+        duration: 400,
+        easing: 'easeInOutQuad',
+      },
+      // 头部向右侧倾
+      ParamAngleZ: {
+        target: -10,
+        duration: 400,
+        easing: 'easeInOutQuad',
+      },
+      // 眼球向上转（思考眼）
+      ParamEyeBallY: {
+        target: -0.6,
+        duration: 400,
+        easing: 'easeInOutQuad',
+      },
+      // 身体微微前倾
+      ParamBodyAngleX: {
+        target: -6,
+        duration: 400,
+        easing: 'easeInOutQuad',
+      },
+    },
+    motionFallback: { group: "Tap", index: 0 },
+  },
+
+  /**
+   * 夸张惊讶
+   * 头快速后仰 + 眼睛睁大 + 身体后仰，比 step_back 更强烈
+   * 触发词：真的吗 / 太惊讶了 / 没想到 / 哇
+   */
+  surprised: {
+    description: "夸张惊讶 - 头后仰眼睛睁大",
+    totalDuration: 500,
+    parameters: {
+      // 头快速后仰
+      ParamAngleX: {
+        target: -18,
+        duration: 200,
+        easing: 'easeInOutQuad',
+      },
+      // 轻微歪头
+      ParamAngleZ: {
+        target: 6,
+        duration: 200,
+        easing: 'easeInOutQuad',
+      },
+      // 眼睛睁大
+      ParamEyeLOpen: {
+        target: 1.0,
+        duration: 150,
+        easing: 'linear',
+      },
+      ParamEyeROpen: {
+        target: 1.0,
+        duration: 150,
+        easing: 'linear',
+      },
+      // 身体后仰
+      ParamBodyAngleX: {
+        target: 12,
+        duration: 200,
+        easing: 'easeInOutQuad',
+      },
+    },
+    motionFallback: { group: "Tap", index: 1 },
+  },
+
+  /**
+   * 兴奋摇摆
+   * 身体左右摇摆 + 头部跟随，像在开心地"扭扭"
+   * 触发词：太棒了 / 好开心 / 完成了 / 耶
+   */
+  excited: {
+    description: "兴奋摇摆 - 身体左右摇摆",
+    totalDuration: 1200,
+    parameters: {
+      // 身体向左摇摆（第一拍）
+      ParamBodyAngleZ: {
+        target: -12,
+        duration: 300,
+        easing: 'easeInOutQuad',
+      },
+      // 头部跟随
+      ParamAngleZ: {
+        target: -8,
+        duration: 300,
+        easing: 'easeInOutQuad',
+      },
+      // 身体微微前倾（活力感）
+      ParamBodyAngleX: {
+        target: -4,
+        duration: 300,
+        easing: 'easeInOutQuad',
+      },
+    },
+    motionFallback: { group: "Tap", index: 1 },
+  },
+
   // ==================== 其他表演动作 ====================
 
   /**

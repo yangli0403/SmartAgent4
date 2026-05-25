@@ -34,6 +34,9 @@ export function getEmotionTagInstructions(): string {
 - [animation:nod] 点头
 - [animation:head_tilt] 歪头
 - [animation:bow] 鞠躬
+- [animation:thinking] 托腮思考，头微低偏侧、眼球上转，适合"让我想想"、"思考一下"等场景
+- [animation:surprised] 夸张惊讶，头后仰眼睛睁大，适合"真的吗"、"太惊讶了"、"没想到"等场景
+- [animation:excited] 兴奋摇摆，身体左右摇晃，适合"太棒了"、"好开心"、"完成了"、"耶"等场景
 
 ### 手势
 - [gesture:thumbs_up] 竖起大拇指，表示赞同
@@ -71,6 +74,9 @@ export function getEmotionTagInstructions(): string {
 - [expression:smile][posture:lean_forward]你好呀！很高兴见到你。[gesture:thumbs_up][animation:wave]
 - [expression:sad][posture:head_down]唉……真的很抱歉听到这个消息。[sound:sigh]
 - [expression:surprised][locomotion:step_back]哇，真的吗？[sound:gasp]太不可思议了！
+- [expression:smile][animation:thinking]让我想想……[pause:1.0]嗯，我觉得是这样的。
+- [expression:surprised][animation:surprised]没想到你会这么说！[sound:gasp]
+- [expression:smile][animation:excited]太棒了！[sound:applause]任务完成啦！
 
 请在合适的位置自然地插入这些标签，让对话更加生动。不要过度使用标签，保持自然流畅。
 `.trim();
@@ -85,7 +91,10 @@ export function getCompactEmotionTagInstructions(): string {
   return `
 在回复中使用 [类型:值] 标签表达情感和动作：
 - 表情: [expression:smile/sad/surprised/angry/fearful/disgusted]
-- 动画: [animation:wave/nod/head_tilt/bow]
+- 动画: [animation:wave/nod/head_tilt/bow/thinking/surprised/excited]
+  - thinking: 托腮思考，用于"让我想想"场景
+  - surprised: 夸张惊讶，用于"真的吗/没想到"场景
+  - excited: 兴奋摇摆，用于"太棒了/完成了"场景
 - 手势: [gesture:thumbs_up/clap/shrug/facepalm/open_palms]
 - 姿态: [posture:lean_forward/lean_back/stand_tall/head_down]
 - 移动: [locomotion:step_forward/step_back/jump/spin]

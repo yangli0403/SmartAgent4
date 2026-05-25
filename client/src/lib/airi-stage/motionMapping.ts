@@ -130,10 +130,33 @@ export const MOTION_MAPPING: MotionMappingConfig = {
   },
 
   idle_sway: {
-    name: "轻微摇晃",
+    name: "轻微摇晉",
     group: "Idle",
     index: 1,
     priority: 0,
+  },
+
+  // ==================== 新增：参数驱动动作（无需单独 Motion 文件）====================
+
+  thinking: {
+    name: "托腮思考",
+    group: "Tap",
+    index: 0,
+    priority: 3,
+  },
+
+  surprised: {
+    name: "夸张惊讶",
+    group: "Tap",
+    index: 1,
+    priority: 4,
+  },
+
+  excited: {
+    name: "兴奋摇摆",
+    group: "Tap",
+    index: 1,
+    priority: 3,
   },
 };
 

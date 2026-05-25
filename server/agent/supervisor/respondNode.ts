@@ -110,14 +110,17 @@ export async function respondNode(
     console.log(`[RespondNode] General+Simple without emotion tags, enriching with emotion tags...`);
     try {
       const enrichPrompt = `你是一个情感标签注入助手。请在以下回复文本的合适位置插入情感和动作标签，让回复更加生动。
-标签格式为 [类型:值]，可用标签：
+标签格式为 [类型:値]，可用标签：
 - 表情: [expression:smile], [expression:happy], [expression:sad], [expression:surprised], [expression:think]
 - 动画: [animation:nod], [animation:wave], [animation:head_tilt], [animation:bow]
+  - [animation:thinking] 托腮思考，用于"让我想想"、思考中等场景
+  - [animation:surprised] 夸张惊讶，用于"真的吗"、"没想到"、"太惊讶了"等场景
+  - [animation:excited] 兴奋摇摆，用于"太棒了"、"好开心"、"完成了"等场景
 - 手势: [gesture:thumbs_up], [gesture:clap], [gesture:shrug], [gesture:open_palms]
 
 规则：
 1. 在回复开头添加一个合适的表情标签
-2. 在回复中间或结尾添加1-2个动作标签
+2. 在回复中间或结尾添加1-2个动作标签，优先选择语义最匹配的标签
 3. 不要修改原始文本内容，只添加标签
 4. 标签要自然，不要过度使用
 
