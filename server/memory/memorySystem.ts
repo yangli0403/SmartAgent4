@@ -290,6 +290,20 @@ export async function deleteMemory(memoryId: number): Promise<boolean> {
   } catch (error) { console.error("[Memory] Error deleting memory:", error); return false; }
 }
 
+export async function deleteAllMemories(userId: number): Promise<{ deleted: number }> {
+  const db = await getDb();
+  if (!db) return { deleted: 0 };
+  try {
+    // 先查询要删除的数量
+    const toDelete = await db.select({ id: memories.id }).from(memories).where(eq(memories.userId, userId));
+    const count = toDelete.length;
+    // 再执行删除
+    await db.delete(memories).where(eq(memories.userId, userId));
+    console.log(`[Memory] deleteAllMemories: deleted ${count} memories for user ${userId}`);
+    return { deleted: count };
+  } catch (error) { console.error("[Memory] Error deleting all memories:", error); return { deleted: 0 }; }
+}
+
 // ==================== 四层过滤记忆提取管道 ====================
 
 /**

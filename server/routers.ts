@@ -136,6 +136,7 @@ import {
   addMemory,
   updateMemory,
   deleteMemory,
+  deleteAllMemories,
 } from "./memory/memorySystem";
 import { runUserMemoryMaintenance } from "./memory/memoryMaintenance";
 import { auditMemoryExtraction } from "./memory/extractionAudit";
@@ -577,6 +578,13 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const success = await deleteMemory(input.id);
         return { success };
+      }),
+
+    clearAll: protectedProcedure
+      .mutation(async ({ ctx }) => {
+        const user = await ensureUser(ctx);
+        const result = await deleteAllMemories(user.id);
+        return { deleted: result.deleted };
       }),
 
     saveSuggestedScene: protectedProcedure

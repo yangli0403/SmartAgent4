@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Brain, Trash2, Plus, RefreshCw } from "lucide-react";
+import { ArrowLeft, Brain, Trash2, Plus, RefreshCw, AlertTriangle } from "lucide-react";
 
 type MemoryKind = "episodic" | "semantic" | "persona";
 type MemoryType = "fact" | "behavior" | "preference" | "emotion";
@@ -80,6 +80,14 @@ export default function Memories() {
       utils.memory.list.invalidate();
     },
     onError: e => toast.error("删除记忆失败：" + e.message),
+  });
+
+  const clearAllMutation = trpc.memory.clearAll.useMutation({
+    onSuccess: (data) => {
+      utils.memory.list.invalidate();
+      toast.success(`已清空 ${data.deleted} 条记忆`);
+    },
+    onError: e => toast.error("清空记忆失败：" + e.message),
   });
 
   const [newContent, setNewContent] = useState("");
@@ -188,17 +196,31 @@ export default function Memories() {
               <h1 className="text-xl font-semibold">记忆中心</h1>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              utils.memory.list.invalidate();
-              toast.success("已刷新列表");
-            }}
-          >
-            <RefreshCw className="mr-1 h-4 w-4" />
-            刷新列表
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                utils.memory.list.invalidate();
+                toast.success("已刷新列表");
+              }}
+            >
+              <RefreshCw className="mr-1 h-4 w-4" />
+              刷新列表
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                if (confirm("确定要清空所有记忆吗？此操作不可恢复！")) {
+                  clearAllMutation.mutate();
+                }
+              }}
+            >
+              <AlertTriangle className="mr-1 h-4 w-4" />
+              清空所有记忆
+            </Button>
+          </div>
         </div>
       </header>
 
