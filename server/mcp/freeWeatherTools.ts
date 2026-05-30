@@ -10,6 +10,19 @@
  */
 
 import type { ToolRegistry } from "./toolRegistry";
+import { diskCacheGet, diskCacheSet } from "../cache/diskCache";
+import { warmupStaticWeather, getStaticCityCoords } from "../cache/staticWeather";
+
+// 启动时预热静态天气数据
+warmupStaticWeather();
+
+// ==================== 天气缓存常量 ====================
+
+/** 天气结果 TTL：30 分钟（天气变化不太快） */
+const WEATHER_TTL_MS = 30 * 60 * 1000;
+
+/** 地理编码 TTL：7 天（城市坐标基本不变） */
+const GEOCODE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // ==================== 工具实现 ====================
 
@@ -50,29 +63,70 @@ function weatherCodeToDesc(code: number): string {
 /**
  * 查询天气（按城市名）
  * 使用 open-meteo geocoding + forecast API
+ * 优化：
+ * 1. 结果缓存 30 分钟
+ * 2. 优先使用静态预热数据中的地理编码（减少外部 API 调用）
  */
 async function getWeatherByCity(city: string): Promise<string> {
+  // 缓存检查
+  const cacheKey = `weather:city:${city}`;
+  const cached = diskCacheGet<string>(cacheKey);
+  if (cached) {
+    console.log(`[Weather] Cache HIT for city: ${city}`);
+    return cached;
+  }
+
   try {
-    // 1. 城市名转经纬度
-    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=zh&format=json`;
-    console.log(`[Weather] Geocoding "${city}" via: ${geoUrl}`);
-    const geoResp = await fetch(geoUrl, { signal: AbortSignal.timeout(8000) });
-    if (!geoResp.ok) throw new Error(`Geocoding failed: ${geoResp.status}`);
-    const geoData = await geoResp.json() as { results?: Array<{ name: string; latitude: number; longitude: number; country: string; admin1?: string }> };
-    console.log(`[Weather] Geocoding result for "${city}":`, JSON.stringify(geoData.results));
+    // 1. 城市名转经纬度（优先使用静态数据，其次检查 diskCache，最后调用 API）
+    let latitude: number, longitude: number, locationName: string;
 
-    if (!geoData.results || geoData.results.length === 0) {
-      console.warn(`[Weather] City not found: ${city}`);
-      return `未找到城市"${city}"的地理信息，请检查城市名称是否正确。`;
+    // 优先使用静态预热数据
+    const staticCoords = getStaticCityCoords(city);
+    if (staticCoords) {
+      console.log(`[Weather] Static geocode HIT for "${city}"`);
+      latitude = staticCoords.latitude;
+      longitude = staticCoords.longitude;
+      locationName = city;
+    } else {
+      // 检查 diskCache
+      const geoCacheKey = `geocode:city:${city.toLowerCase()}`;
+      const cachedGeo = diskCacheGet<{ latitude: number; longitude: number; name: string; country: string; admin1?: string }>(geoCacheKey);
+      if (cachedGeo) {
+        console.log(`[Weather] Geocode cache HIT for "${city}"`);
+        latitude = cachedGeo.latitude;
+        longitude = cachedGeo.longitude;
+        locationName = cachedGeo.admin1 ? `${cachedGeo.country} ${cachedGeo.admin1} ${cachedGeo.name}` : `${cachedGeo.country} ${cachedGeo.name}`;
+      } else {
+        // 调用外部 API
+        const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=zh&format=json`;
+        console.log(`[Weather] Geocoding "${city}" via: ${geoUrl}`);
+        const geoResp = await fetch(geoUrl, { signal: AbortSignal.timeout(8000) });
+        if (!geoResp.ok) throw new Error(`Geocoding failed: ${geoResp.status}`);
+        const geoData = await geoResp.json() as { results?: Array<{ name: string; latitude: number; longitude: number; country: string; admin1?: string }> };
+        console.log(`[Weather] Geocoding result for "${city}":`, JSON.stringify(geoData.results));
+
+        if (!geoData.results || geoData.results.length === 0) {
+          console.warn(`[Weather] City not found: ${city}`);
+          return `未找到城市"${city}"的地理信息，请检查城市名称是否正确。`;
+        }
+
+        const location = geoData.results[0];
+        latitude = location.latitude;
+        longitude = location.longitude;
+        locationName = location.admin1 ? `${location.country} ${location.admin1} ${location.name}` : `${location.country} ${location.name}`;
+
+        // 缓存地理编码结果
+        diskCacheSet(geoCacheKey, location, GEOCODE_TTL_MS);
+      }
     }
-
-    const location = geoData.results[0];
-    const { latitude, longitude, name, country, admin1 } = location;
-    const locationName = admin1 ? `${country} ${admin1} ${name}` : `${country} ${name}`;
 
     // 2. 查询天气
     console.log(`[Weather] Fetching weather for ${city} (lat=${latitude}, lon=${longitude})`);
-    return await getWeatherByCoords(latitude, longitude, locationName);
+    const result = await getWeatherByCoords(latitude, longitude, locationName);
+
+    // 缓存天气结果
+    diskCacheSet(cacheKey, result, WEATHER_TTL_MS);
+    return result;
   } catch (e) {
     // 降级到 wttr.in（仅在 open-meteo 完全失败时使用）
     console.warn(`[Weather] open-meteo failed: ${(e as Error).message}, trying wttr.in fallback...`);
@@ -119,6 +173,8 @@ async function getWeatherByCity(city: string): Promise<string> {
         });
       }
 
+      // 缓存 wttr.in 结果（降级源也缓存）
+      diskCacheSet(cacheKey, result, WEATHER_TTL_MS);
       return result;
     } catch (e2) {
       return `天气查询失败: ${(e as Error).message}`;
@@ -129,12 +185,21 @@ async function getWeatherByCity(city: string): Promise<string> {
 /**
  * 查询天气（按经纬度）
  * 使用 open-meteo forecast API
+ * 优化：结果缓存 30 分钟
  */
 async function getWeatherByCoords(
   latitude: number,
   longitude: number,
   locationName?: string
 ): Promise<string> {
+  // 缓存检查
+  const cacheKey = `weather:coords:${latitude.toFixed(4)},${longitude.toFixed(4)}`;
+  const cached = diskCacheGet<string>(cacheKey);
+  if (cached) {
+    console.log(`[Weather] Cache HIT for coords: ${latitude}, ${longitude}`);
+    return cached;
+  }
+
   try {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto&forecast_days=3`;
     console.log(`[Weather] Fetching forecast from open-meteo: ${url}`);
@@ -186,6 +251,8 @@ async function getWeatherByCoords(
       });
     }
 
+    // 缓存结果
+    diskCacheSet(cacheKey, result, WEATHER_TTL_MS);
     return result;
   } catch (e) {
     return `天气查询失败: ${(e as Error).message}`;
@@ -236,38 +303,79 @@ async function getLocationByIP(ip?: string): Promise<string> {
 /**
  * 城市名转经纬度（地理编码）
  * 使用 open-meteo geocoding API
+ * 优化：
+ * 1. 优先使用静态预热数据
+ * 2. 结果缓存 7 天
  */
 async function geocodeCity(city: string): Promise<string> {
-  try {
-    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=5&language=zh&format=json`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!resp.ok) throw new Error(`Geocoding failed: ${resp.status}`);
+  // 缓存检查
+  const cacheKey = `geocode:city:${city.toLowerCase()}`;
 
-    const data = await resp.json() as {
-      results?: Array<{
-        name: string;
-        latitude: number;
-        longitude: number;
-        country: string;
-        admin1?: string;
-        admin2?: string;
-      }>;
-    };
-
-    if (!data.results || data.results.length === 0) {
-      return `未找到城市"${city}"的地理信息。`;
-    }
-
-    let result = `📍 "${city}" 地理编码结果:\n`;
-    data.results.slice(0, 3).forEach((r, i) => {
-      const fullName = [r.country, r.admin1, r.admin2, r.name].filter(Boolean).join(" > ");
-      result += `${i + 1}. ${fullName}\n   坐标: 纬度 ${r.latitude.toFixed(4)}, 经度 ${r.longitude.toFixed(4)}\n`;
-    });
-
-    return result;
-  } catch (e) {
-    return `地理编码失败: ${(e as Error).message}`;
+  // 优先使用静态预热数据
+  const staticGeocode = getStaticCityCoords(city);
+  if (staticGeocode) {
+    console.log(`[Weather] Static geocode for "${city}"`);
+    const fullName = `中国 > ${city}`;
+    return `📍 "${city}" 地理编码结果（静态数据）:\n1. ${fullName}\n   坐标: 纬度 ${staticGeocode.latitude.toFixed(4)}, 经度 ${staticGeocode.longitude.toFixed(4)}\n`;
   }
+
+  const cached = diskCacheGet<Array<{
+    name: string;
+    latitude: number;
+    longitude: number;
+    country: string;
+    admin1?: string;
+    admin2?: string;
+  }>>(cacheKey);
+
+  let results: Array<{
+    name: string;
+    latitude: number;
+    longitude: number;
+    country: string;
+    admin1?: string;
+    admin2?: string;
+  }>;
+
+  if (cached) {
+    console.log(`[Weather] Geocode cache HIT for city: ${city}`);
+    results = cached;
+  } else {
+    try {
+      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=5&language=zh&format=json`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (!resp.ok) throw new Error(`Geocoding failed: ${resp.status}`);
+
+      const data = await resp.json() as {
+        results?: Array<{
+          name: string;
+          latitude: number;
+          longitude: number;
+          country: string;
+          admin1?: string;
+          admin2?: string;
+        }>;
+      };
+
+      if (!data.results || data.results.length === 0) {
+        return `未找到城市"${city}"的地理信息。`;
+      }
+
+      results = data.results;
+      // 缓存结果
+      diskCacheSet(cacheKey, results, GEOCODE_TTL_MS);
+    } catch (e) {
+      return `地理编码失败: ${(e as Error).message}`;
+    }
+  }
+
+  let result = `📍 "${city}" 地理编码结果:\n`;
+  results.slice(0, 3).forEach((r, i) => {
+    const fullName = [r.country, r.admin1, r.admin2, r.name].filter(Boolean).join(" > ");
+    result += `${i + 1}. ${fullName}\n   坐标: 纬度 ${r.latitude.toFixed(4)}, 经度 ${r.longitude.toFixed(4)}\n`;
+  });
+
+  return result;
 }
 
 // ==================== 注册到 ToolRegistry ====================

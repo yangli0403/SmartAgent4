@@ -1,0 +1,93 @@
+{
+  "$schema": "static-weather-v1",
+  "description": "静态天气预热数据 - 常见城市天气缓存，启动时加载到 diskCache",
+  "lastUpdated": "2026-05-30",
+  "cities": {
+    "北京": {
+      "name": "北京",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "timezone": "Asia/Shanghai"
+    },
+    "上海": {
+      "name": "上海",
+      "latitude": 31.2304,
+      "longitude": 121.4737,
+      "timezone": "Asia/Shanghai"
+    },
+    "广州": {
+      "name": "广州",
+      "latitude": 23.1291,
+      "longitude": 113.2644,
+      "timezone": "Asia/Shanghai"
+    },
+    "深圳": {
+      "name": "深圳",
+      "latitude": 22.5431,
+      "longitude": 114.0579,
+      "timezone": "Asia/Shanghai"
+    },
+    "杭州": {
+      "name": "杭州",
+      "latitude": 30.2875,
+      "longitude": 120.1536,
+      "timezone": "Asia/Shanghai"
+    },
+    "苏州": {
+      "name": "苏州",
+      "latitude": 31.2994,
+      "longitude": 120.6196,
+      "timezone": "Asia/Shanghai"
+    },
+    "南京": {
+      "name": "南京",
+      "latitude": 32.0603,
+      "longitude": 118.7969,
+      "timezone": "Asia/Shanghai"
+    },
+    "成都": {
+      "name": "成都",
+      "latitude": 30.5728,
+      "longitude": 104.0668,
+      "timezone": "Asia/Shanghai"
+    },
+    "武汉": {
+      "name": "武汉",
+      "latitude": 30.5928,
+      "longitude": 114.3055,
+      "timezone": "Asia/Shanghai"
+    },
+    "西安": {
+      "name": "西安",
+      "latitude": 34.3416,
+      "longitude": 108.9398,
+      "timezone": "Asia/Shanghai"
+    },
+    "重庆": {
+      "name": "重庆",
+      "latitude": 29.4316,
+      "longitude": 106.9123,
+      "timezone": "Asia/Shanghai"
+    },
+    "天津": {
+      "name": "天津",
+      "latitude": 39.3434,
+      "longitude": 117.3616,
+      "timezone": "Asia/Shanghai"
+    }
+  },
+  "geocodes": {
+    "北京": { "latitude": 39.9042, "longitude": 116.4074, "country": "中国", "admin1": "北京", "name": "北京" },
+    "上海": { "latitude": 31.2304, "longitude": 121.4737, "country": "中国", "admin1": "上海", "name": "上海" },
+    "广州": { "latitude": 23.1291, "longitude": 113.2644, "country": "中国", "admin1": "广东", "name": "广州" },
+    "深圳": { "latitude": 22.5431, "longitude": 114.0579, "country": "中国", "admin1": "广东", "name": "深圳" },
+    "杭州": { "latitude": 30.2875, "longitude": 120.1536, "country": "中国", "admin1": "浙江", "name": "杭州" },
+    "苏州": { "latitude": 31.2994, "longitude": 120.6196, "country": "中国", "admin1": "江苏", "name": "苏州" },
+    "南京": { "latitude": 32.0603, "longitude": 118.7969, "country": "中国", "admin1": "江苏", "name": "南京" },
+    "成都": { "latitude": 30.5728, "longitude": 104.0668, "country": "中国", "admin1": "四川", "name": "成都" },
+    "武汉": { "latitude": 30.5928, "longitude": 114.3055, "country": "中国", "admin1": "湖北", "name": "武汉" },
+    "西安": { "latitude": 34.3416, "longitude": 108.9398, "country": "中国", "admin1": "陕西", "name": "西安" },
+    "重庆": { "latitude": 29.4316, "longitude": 106.9123, "country": "中国", "admin1": "重庆", "name": "重庆" },
+    "天津": { "latitude": 39.3434, "longitude": 117.3616, "country": "中国", "admin1": "天津", "name": "天津" }
+  }
+}

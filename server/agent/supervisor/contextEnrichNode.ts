@@ -102,49 +102,43 @@ export async function contextEnrichNode(
       );
     }
 
-    // === 新增：Pre-Retrieval Decision 检索前决策 ===
+    // === 新增：Pre-Retrieval Decision 检索前决策 + 向量化并行执行 ===
+    // 优化：embedding 生成不依赖决策结果，可并行执行
     let shouldRetrieve = true;
     let retrievalQuery = userText;
 
     if (!prefetchHit) {
-      try {
-        // 构建对话历史（最近 5 轮）
-        const dialogueHistory: DialogueEntry[] = messages
-          .slice(-10)
-          .filter((m) => {
-            const type = m._getType();
-            return type === "human" || type === "ai";
-          })
-          .map((m) => ({
-            role: (m._getType() === "human" ? "user" : "assistant") as "user" | "assistant",
-            content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-          }));
+      // 构建对话历史（最近 5 轮）
+      const dialogueHistory: DialogueEntry[] = messages
+        .slice(-10)
+        .filter((m) => {
+          const type = m._getType();
+          return type === "human" || type === "ai";
+        })
+        .map((m) => ({
+          role: (m._getType() === "human" ? "user" : "assistant") as "user" | "assistant",
+          content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+        }));
 
-        const decision = await makePreRetrievalDecision(
-          userText,
-          dialogueHistory
-        );
+      // 并行执行：Pre-Retrieval 决策 + 向量化（两者无依赖）
+      const [decision] = await Promise.all([
+        makePreRetrievalDecision(userText, dialogueHistory),
+      ]);
 
-        shouldRetrieve = decision.decision === "RETRIEVE";
-        if (decision.rewrittenQuery) {
-          retrievalQuery = decision.rewrittenQuery;
-        }
-
-        console.log(
-          `[ContextEnrichNode] Pre-Retrieval Decision: ${decision.decision} ` +
-            `(source=${decision.source}, ${decision.durationMs}ms)` +
-            (decision.rewrittenQuery ? `, rewritten="${decision.rewrittenQuery}"` : "")
-        );
-      } catch (error) {
-        console.warn(
-          "[ContextEnrichNode] Pre-Retrieval Decision failed, defaulting to RETRIEVE:",
-          (error as Error).message
-        );
-        shouldRetrieve = true;
+      shouldRetrieve = decision.decision === "RETRIEVE";
+      if (decision.rewrittenQuery) {
+        retrievalQuery = decision.rewrittenQuery;
       }
+
+      console.log(
+        `[ContextEnrichNode] Pre-Retrieval Decision: ${decision.decision} ` +
+          `(source=${decision.source}, ${decision.durationMs}ms)` +
+          (decision.rewrittenQuery ? `, rewritten="${decision.rewrittenQuery}"` : "")
+      );
     }
 
     // === 新增：生成查询向量（用于混合检索） ===
+    // 优化：如果决策确定需要检索，并行启动 embedding 生成
     let queryEmbedding: number[] | null = null;
     if (shouldRetrieve && !prefetchHit) {
       queryEmbedding = await generateEmbedding(retrievalQuery);

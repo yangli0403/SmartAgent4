@@ -407,9 +407,10 @@ export async function makePreRetrievalDecision(
       };
     }
 
-    // 规则层判定 RETRIEVE → 尝试查询重写
+    // 规则层判定 RETRIEVE → 仅在有对话历史时才需要查询重写（代词解析需要上下文）
+    // 如果没有历史对话，查询本身已经足够明确，无需 LLM 重写
     let rewrittenQuery: string | null = null;
-    if (mergedConfig.enableLLM) {
+    if (mergedConfig.enableLLM && dialogueHistory.length > 0) {
       try {
         rewrittenQuery = await rewriteQuery(
           userQuery,

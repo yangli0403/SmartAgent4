@@ -158,7 +158,8 @@ describe("Domain Agents", () => {
       expect(agent.availableTools).toContain("memory_search");
       expect(agent.availableTools).toContain("memory_update");
       expect(agent.availableTools).toContain("memory_forget");
-      expect(agent.availableTools.length).toBe(4);
+      expect(agent.availableTools).toContain("get_latest_news");
+      expect(agent.availableTools.length).toBe(5);
     });
 
     it("系统提示词应包含对话指引", () => {
