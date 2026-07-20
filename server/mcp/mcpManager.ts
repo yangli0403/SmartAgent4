@@ -139,22 +139,39 @@ export class MCPManager implements IMCPManager {
     );
 
     let successCount = 0;
-    let failCount = 0;
+    const failures: Array<{ name: string; error: string; stack?: string }> = [];
 
     results.forEach((result, index) => {
+      const serverName = autoConnectServers[index].name;
       if (result.status === "fulfilled") {
         successCount++;
       } else {
-        failCount++;
+        const reason = result.reason;
+        const errMsg = reason instanceof Error ? reason.message : String(reason);
+        const errStack = reason instanceof Error ? reason.stack : undefined;
+        failures.push({ name: serverName, error: errMsg, stack: errStack });
         console.error(
-          `[MCPManager] Failed to connect ${autoConnectServers[index].name}:`,
-          result.reason
+          `[MCPManager] Failed to connect MCP server "${serverName}":`,
+          {
+            mcp_name: serverName,
+            operation: "initialize.connect",
+            error: errMsg,
+          }
         );
       }
     });
 
+    if (failures.length > 0) {
+      const summary = failures
+        .map((f) => `  - ${f.name}: ${f.error}`)
+        .join("\n");
+      console.error(
+        `[MCPManager] Initialization completed with ${failures.length} failure(s). Affected MCP servers:\n${summary}`
+      );
+    }
+
     console.log(
-      `[MCPManager] Initialization complete: ${successCount} connected, ${failCount} failed`
+      `[MCPManager] Initialization complete: ${successCount} connected, ${failures.length} failed`
     );
     console.log(
       `[MCPManager] Total tools registered: ${this.toolRegistry.size()}`

@@ -2,13 +2,13 @@
 
 > 本文件是 SmartAgent4 项目的**高层架构浓缩版**，专为 AI 编程助手设计。
 > 在每次代码分析或优化对话开始时，请优先阅读本文件以快速建立项目全局视角。
-> **最后更新：** 2026-04-13（第八轮迭代 — AIRI 前端角色舞台集成：Live2D + 事件驱动 + 状态机）
+> **最后更新：** 2026-06-18（第十轮迭代 — M4 阶段：preAnalysisNode 接入 supervisorGraph，executionMode 替代 complexity，SSE sseSchemaVersion 强约束）
 
 ---
 
 ## 1. 项目定位
 
-SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话系统，融合了个性引擎、三层记忆系统（含四层过滤管道、**向量语义检索**、**智能预检索决策**与**主动预测预取**）、情感表达渲染、自进化闭环能力，以及多智能体协同架构。底层使用 TypeScript + Node.js，前端使用 React + Vite + TailwindCSS，数据库使用 PostgreSQL（Drizzle ORM）。
+SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话系统，融合了个性引擎、三层记忆系统（含四层过滤管道、**向量语义检索**、**智能预检索决策**与**主动预测预取**）、情感表达渲染、自进化闭环能力，以及多智能体协同架构。底层使用 TypeScript + Node.js，前端使用 React + Vite + TailwindCSS，数据库使用 PostgreSQL（Drizzle ORM）。**v1.3 起：执行模式 executionMode（single/parallel/plan）替代 complexity 作为权威字段。**
 
 ## 2. 技术栈速查
 
@@ -61,6 +61,7 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 
 ```
 用户消息
+  → [preAnalysisNode]       **[第九轮新增 v1.3]** 4 路流水线：PrefetchCache → RuleLayer → 相似度短路 → LLM，输出 PreAnalyzerOutput
   → [contextEnrichNode]     **Pre-Retrieval Decision** → 检查预取缓存 → 向量化查询 → 混合检索(BM25+向量) + 构建画像 + 动态 System Prompt
   → [classifyNode]          意图分类（动态 Prompt 注入），按复杂度路由
   → [planNode?]             复杂任务多步规划（动态 Agent 列表 + 并行提示）
@@ -77,6 +78,7 @@ SmartAgent4 是一个基于 **LangGraph Supervisor-Agent 架构**的智能对话
 
 | 节点 | 文件路径 | 职责 |
 |------|---------|------|
+| **preAnalysisNode** | `server/agent/preAnalysis/node/preAnalysisNode.ts` | **[第九轮新增 v1.3]** 4 路流水线编排：PrefetchCache 命中 → RuleLayer complete → rulePartial 满足 → LLM；含 schemaVersion 校验、soft/hard 超时降级、14 项 v1.3 修复 |
 | **contextEnrichNode** | `server/agent/supervisor/contextEnrichNode.ts` | **[第七轮增强]** Pre-Retrieval Decision → 缓存/向量检索/跳过三路分支 + 构建画像 + 动态 System Prompt |
 | classifyNode | `server/agent/supervisor/classifyNode.ts` | **[第五轮增强]** 意图分类，**Prompt Caching 动态信息分离** |
 | planNode | `server/agent/supervisor/planNode.ts` | **[第五轮增强]** 复杂任务多步规划，**Prompt Caching 动态信息分离** |
@@ -199,7 +201,33 @@ DreamGatekeeper → [backfillExtraction] LLM 回溯提取 + 去重
 | `memoryExtractionNode.ts` | 行为检测从自动提取流程中解耦，基于对话计数器独立触发 |
 | `hybridSearch.ts` | 向量不可用时自动回退到纯 BM25，动态调整 alpha 权重 |
 
-## 8. 自进化闭环
+## 8. 第十轮 M4 阶段 — supervisorGraph 集成与 v1.3 字段收敛
+
+### 8.1 关键变更
+
+- **preAnalysisNode 已接入 supervisorGraph**（`START → preAnalysis → contextEnrich → classify → [plan | execute] → ...`）
+- **executionMode 替代 complexity**：`TaskClassification.executionMode: "single" | "parallel" | "plan"` 作为权威字段；`complexity` 保留为 `@deprecated` 别名
+- **新增 state 字段**：`preAnalysisResult: PreAnalyzerOutput | null`、`sceneActivationResult: SceneActivationOutput | null`
+- **SSE 强约束**：`runSupervisorStreaming.ts` + `supervisorStreaming.ts` 强制注入 `sseSchemaVersion: "v1.3"`（CI gate 强约束）
+- **classifyNode 删 LLM 调用**：直接消费 `preAnalysisResult`，LLM 仅作 fallback
+- **contextEnrichNode 读 preAnalysisResult**：`rewrittenQuery` 优先级高于 Pre-Retrieval Decision；`memoryRelevant=false` 跳过检索
+
+### 8.2 关键文件变更
+
+| 文件 | 变更 |
+|------|------|
+| `server/agent/supervisor/state.ts` | 新增 `preAnalysisResult` + `sceneActivationResult` Annotation；`TaskClassification.executionMode` 权威化；新增 `COMPLEXITY_TO_EXECUTION_MODE` / `EXECUTION_MODE_TO_COMPLEXITY` |
+| `server/agent/supervisor/supervisorGraph.ts` | 新增 `preAnalysis` 节点；新增 `routeByExecutionMode`；`SupervisorOutput.classification.executionMode` 替代 `complexity` |
+| `server/agent/supervisor/classifyNode.ts` | 移除 LLM 主路径（保留 fallback）；读 `state.preAnalysisResult`；新增 `inferExecutionMode(agents)` |
+| `server/agent/supervisor/contextEnrichNode.ts` | 读 `preAnalysisResult.rewrittenQuery` + `memoryRelevant` |
+| `server/agent/supervisor/runSupervisorStreaming.ts` | 注入 `sseSchemaVersion` 常量（CI gate） |
+| `server/agent/supervisor/supervisorStreaming.ts` | 注入 `sseSchemaVersion` 常量；新增 `preAnalysisPublished` 事件状态 |
+| `server/agent/discovery/dynamicPromptAssembler.ts` | prompt schema `executionMode` 替代 `complexity` |
+| `server/routers/chatRouterEnhanced.ts` | SSE complexity 事件携带 `sseSchemaVersion: 'v1.3'` |
+| `tests/e2e/M4_supervisorGraphIntegration.test.ts` | 7 个 e2e 覆盖 preAnalysis→contextEnrich→classify 串联 |
+| `tests/preAnalysis/sse/sseCompatGate.test.ts` | 9 个 gate 强约束测试 |
+
+## 9. 自进化闭环
 
 工具调用 → `reflectionNode` 异步分析 → `ToolRegistry.updateUtility()` (EMA 算法) → `tool_utility_logs` 表持久化 → LLM 反思生成 Prompt 补丁 → `prompt_versions` 表版本控制。
 
@@ -225,9 +253,69 @@ DreamGatekeeper → [backfillExtraction] LLM 回溯提取 + 去重
 - **配置**：`vitest.config.ts`
 - **运行**：`pnpm test` 或 `npx vitest run`
 - **覆盖率**：`npx vitest run --coverage`
-- **现状**：后端 654 个测试，前端新增 71 个 AIRI 舞台测试（全部通过）。
+- **现状**：后端 864 个测试（含第九轮新增 210 个 preAnalysis 测试），前端 71 个 AIRI 舞台测试（全部通过）。
 - **新增模块覆盖率**：AIRI 核心库（`lib/airi-stage`）语句/分支/函数 100%。
 - **全量测试文档**：`TESTING.md` (后端) / `docs/TESTING_AIRI_STAGE.md` (前端)。
+
+## 10.5 意图预分析模块（第九轮迭代新增 v1.3）
+
+取代原 `intentClassifier` 中 LLM-only 调用，构建"缓存优先 + 规则兜底 + LLM 兜底"的 4 路流水线，输出统一的 `PreAnalyzerOutput`，与下游 `contextEnrichNode` 解耦。
+
+### 10.5.1 流水线
+
+```
+用户输入 → Path 1 PrefetchCache
+            ├─ 命中 (schema=v1)       → 直接返回 source=prefetch
+            └─ schema 不匹配 (v0)     → 记录 prefetch_invalid_version，降级
+         → Path 2 RuleLayer
+            ├─ isComplete=true         → 返回 source=rule
+            └─ partial 字段           → Path 4b 跳过 LLM
+         → Path 3 相似度短路（P2 占位）
+         → Path 4 LLM
+            ├─ 成功                  → 返回 source=llm
+            ├─ soft timeout (3s)     → 降级 source=rule [fallback:llm_soft_timeout]
+            ├─ hard timeout (8s)     → 降级 source=rule [fallback:llm_hard_timeout]
+            └─ 错误                  → 降级 source=rule [fallback:llm_error]
+         → 输出 PreAnalyzerOutput
+```
+
+### 10.5.2 核心组件
+
+| 组件 | 文件 | 职责 |
+|------|------|------|
+| **preAnalysisNode** | `server/agent/preAnalysis/node/preAnalysisNode.ts` | 主流程编排器，4 路流水线 + 14 项 v1.3 修复集成点 |
+| PrefetchCache | `server/agent/preAnalysis/cache/prefetchCache.ts` | LRU+TTL 缓存，`schemaVersion: "v1"` 校验 + `setRaw/computeHash` 测试 seam（v1.3 修复 #7） |
+| RuleLayer | `server/agent/preAnalysis/rules/ruleLayer.ts` | 多租户规则评估器，`isComplete` 遍历所有规则 + `calculateConfidence` 统一公式（v1.3 修复 #2/#5/#8/#10） |
+| LLMPreAnalyzer | `server/agent/preAnalysis/llm/llmPreAnalyzer.ts` | LLM 调用器，`memoryRelevant` 默认 false + `domain→'unknown'` + soft/hard 超时分级 + Prompt 模板版本控制（v1.3 修复 #1/#9/#12/#13） |
+| SceneActivationCache | `server/agent/preAnalysis/cache/sceneActivationCache.ts` | 5min TTL LRU，sceneActivation schema **不含** `memoryRelevant`（v1.3 修复 #4）+ fire-and-forget 异步填充（v1.3 修复 #14）|
+| PreAnalyzerOutput | `server/agent/preAnalysis/types/preAnalyzerOutput.ts` | Zod 严格 schema：6 业务字段 + 2 元字段（`source`/`schemaVersion="v1"`）|
+| SSE Event Schema | `server/agent/preAnalysis/sse/sseEventSchema.ts` | 全部 SSE 事件工厂自动注入 `sseSchemaVersion: "v1.3"`（v1.3 修复 #11） |
+
+### 10.5.3 v1.3 关键修复（14 项）
+
+| # | 修复 | 落地位置 |
+|---|------|---------|
+| #1 | `memoryRelevant` 默认 false | `LLMPreAnalyzerImpl.normalize()` |
+| #2 | RuleLayer `isComplete` 遍历所有规则 | `ruleLayer.evaluate()` |
+| #3 | rulePartial 拼接策略（只填 undefined） | `preAnalysisNode.mergeRulePartial()` |
+| #4 | sceneActivation schema 移除 `memoryRelevant` | `sceneActivationOutput.ts` |
+| #5 | `calculateConfidence` 统一公式 | `ruleLayer.calculateConfidence()` |
+| #6 | A/B test fallback FineTuned→LLM→rule | `preAnalysisNode` |
+| #7 | PrefetchCache `schemaVersion` 校验 + `setRaw` seam | `prefetchCache.ts` |
+| #8 | 多租户规则隔离 | `ruleLayer` tenant 维度 |
+| #9 | LLM `domain → 'unknown'` 兜底 | `LLMPreAnalyzerImpl.normalize()` |
+| #10 | 多租户配置注入 | `RuleLayerConfig.tenant` |
+| #11 | SSE `sseSchemaVersion: "v1.3"` 注入 | `sseEventSchema.ts` 工厂 |
+| #12 | Prompt 模板版本控制 | `LLMPreAnalyzerImpl.PROMPT_VERSION` |
+| #13 | LLM soft(3s)/hard(8s) 超时分级 | `LLMTimeoutError.type` |
+| #14 | SceneActivationCache fire-and-forget 异步填充 | `preAnalysisNode.fireAndForgetSceneActivation()` |
+
+### 10.5.4 Observability 接入
+
+- **10 指标** (M1-M10)：见 `server/observability/metrics.ts` COUNTER/HISTOGRAM/GAUGE_NAMES
+- **7 告警** (A1-A7)：见 `server/observability/alerts.ts` ALERT_THRESHOLDS
+- **全链路 trace**：`tracer.startSpan("preAnalysis", { parentSpanId, attributes })` 包裹主流程
+- **测试覆盖**：`tests/preAnalysis/` (84) + `tests/observability/` (33) + `tests/integration/` (11) + `tests/e2e/` (23) = **210 测试全绿**
 
 ## 11. 开发约定
 
@@ -247,7 +335,31 @@ DreamGatekeeper → [backfillExtraction] LLM 回溯提取 + 去重
 - [ ] AIRI Bridge 流式输出（边说边动）与前端舞台的深度结合
 - [ ] 探索更小、更快的本地模型（如 Llama-3-8B）用于后台预测任务，降低 Token 成本
 - [ ] 实现事件驱动的预取缓存失效机制（目前仅依赖 TTL）
+- [x] ~~意图预分析模块重构 v1.3~~（第九轮已实现：4 路流水线 + 14 项修复 + 10 指标 + 7 告警 + 210 测试全绿）
+- [ ] preAnalysisNode 接入 supervisorGraph（替换原 intentClassifier LLM 调用）
+- [ ] 接入 class 11.x 中的 CI gate 静态扫描（`sseCompatGate.test.ts` 当前为警告级，待转为强约束）
 
 ---
 
-> **使用方式**：在每次 AI 辅助开发对话的开头，发送“请先阅读 CLAUDE.md”即可让 AI 快速理解项目全貌。
+> **使用方式**：在每次 AI 辅助开发对话的开头，发送”请先阅读 CLAUDE.md”即可让 AI 快速理解项目全貌。
+
+---
+
+## gstack 技能配置
+
+本项目已配置 gstack，优先使用 gstack 技能进行代码开发工作流。
+
+**可用技能：**
+- `/review` — 代码 review + 自动修复明显 bug
+- `/ship` — sync main → run tests → push → open PR
+- `/qa <url>` — 打开真实浏览器测试 app，找 bug 并修复
+- `/autoplan` — 一键生成完整实现计划
+- `/office-hours` — 产品需求分析
+- `/investigate` — 调试问题根源分析
+- `/browse` — 持久化浏览器（~100ms/命令）
+
+**使用约定：**
+- 涉及代码 review 时，使用 `/review`
+- 涉及调试问题时，使用 `/investigate`
+- 提交代码前，使用 `/ship` 自动处理 PR
+- 测试前端 UI 时，使用 `/qa`

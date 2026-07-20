@@ -31,6 +31,10 @@ import {
 } from "./supervisorStreaming";
 import { publishSupervisorEvent } from "./supervisorEventBus";
 import { checkAndPublishProactiveSuggestion } from "../../memory/proactiveSuggestion";
+import { CURRENT_SSE_SCHEMA_VERSION } from "../preAnalysis/sse/sseEventSchema";
+
+/** v1.3 修复 #11：所有 SSE 事件携带 sseSchemaVersion（CI gate 强约束） */
+const SSE_SCHEMA_VERSION = CURRENT_SSE_SCHEMA_VERSION;
 
 export interface SupervisorStreamingInput extends SupervisorInput {
   /** 与前端 SSE 通道关联的请求 ID（必须在 mutation 调用之前生成） */
@@ -104,6 +108,7 @@ export const runSupervisorStreaming = traceable(
             | StreamUpdate
             | undefined;
           if (!partial) continue;
+          // v1.3：Object.assign 已自动复制 preAnalysisResult（如 preAnalysisNode 写入）
           Object.assign(merged, partial);
         }
         publishEventsFromUpdates(merged, ctx);
@@ -126,7 +131,8 @@ export const runSupervisorStreaming = traceable(
           "抱歉，我无法处理您的请求。请尝试重新描述。",
         classification: {
           domain: finalState?.taskClassification?.domain || "unknown",
-          complexity: finalState?.taskClassification?.complexity || "unknown",
+          executionMode: finalState?.taskClassification?.executionMode || "single",
+          complexity: finalState?.taskClassification?.complexity || "simple",
         },
         stepsExecuted: stepResults.length,
         totalToolCalls,
@@ -169,7 +175,7 @@ export const runSupervisorStreaming = traceable(
 
       return {
         response: `抱歉，处理您的请求时遇到了问题：${message}。请稍后重试。`,
-        classification: { domain: "unknown", complexity: "unknown" },
+        classification: { domain: "unknown", executionMode: "single", complexity: "simple" },
         stepsExecuted: 0,
         totalToolCalls: 0,
         totalDurationMs,

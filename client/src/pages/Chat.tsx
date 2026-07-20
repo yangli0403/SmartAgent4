@@ -21,6 +21,7 @@ import type { ChatUiMessage } from "@shared/chatTts";
 import { TtsPlayback } from "@/components/TtsPlayback";
 import { dispatchAssistantStageReply } from "@/lib/airi-stage";
 import { ThinkingBubble } from "@/components/cockpit/ThinkingBubble";
+import AutoDLCard from "@/components/autodl/AutoDLCard";
 import {
   Dialog,
   DialogContent,
@@ -310,6 +311,11 @@ export default function Chat() {
               ))}
             </div>
           </ScrollArea>
+
+          {/* AutoDL 状态卡片 (T-AUTODL-011) */}
+          <div className="p-2 border-t shrink-0">
+            <AutoDLCard />
+          </div>
         </aside>
 
         {/* 主聊天区 */}

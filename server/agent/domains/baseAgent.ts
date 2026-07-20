@@ -446,17 +446,33 @@ export abstract class BaseAgent implements DomainAgentInterface {
               : JSON.stringify(result);
           } catch (error) {
             const callDuration = Date.now() - callStart;
+            const err = error as Error;
+            const errMsg = err?.message || String(error);
+            const errStack = err?.stack;
+
+            // 显式记录错误（不静默吞咽）：包含失败的操作、MCP 名称、原始错误信息
+            console.error(
+              `[${this.name}] MCP callTool failed: operation=callTool, mcp_name=${registeredTool.serverId}, tool=${toolName}, duration=${callDuration}ms`,
+              {
+                error: errMsg,
+                stack: errStack,
+                toolName,
+                mcp_name: registeredTool.serverId,
+                input: callArgs,
+              }
+            );
 
             toolCallRecords.push({
               toolName,
               serverId: registeredTool.serverId,
               input: callArgs,
-              output: (error as Error).message,
+              output: errMsg,
               status: "error",
               durationMs: callDuration,
             });
 
-            return `Error calling ${toolName}: ${(error as Error).message}`;
+            // 返回显式降级字符串（带 [MCP_CALL_ERROR] 前缀便于 LLM 区分错误与正常返回）
+            return `[MCP_CALL_ERROR] tool=${toolName} (mcp=${registeredTool.serverId}) failed: ${errMsg}`;
           }
         },
       });

@@ -40,6 +40,8 @@ export interface PredictedIntent {
 export interface PrefetchCacheEntry {
   /** 用户 ID */
   userId: number;
+  /** v1.3 修复 #7：schema 版本（前端/下游判断字段兼容） */
+  schemaVersion?: "v1.3";
   /** 对应的意图预测结果 */
   predictedIntent: PredictedIntent;
   /** 预取的记忆列表 */

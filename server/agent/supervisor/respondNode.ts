@@ -91,7 +91,8 @@ export async function respondNode(
   // === 对于 general + simple 且无工具调用的任务，直接使用 Agent 输出 ===
   // 这类任务（如写诗、写故事、知识问答等）的 Agent 输出就是最终回复，
   // 不需要二次“汇总”，否则会导致创意内容丢失。
-  const isGeneralSimple = taskClassification?.domain === "general" && taskClassification?.complexity === "simple";
+  // v1.3：executionMode 替代 complexity 作为权威字段（向后兼容：通过映射换算）
+  const isGeneralSimple = taskClassification?.domain === "general" && taskClassification?.executionMode === "single";
   const hasNoToolCalls = stepResults.every(r => !r.toolCalls || r.toolCalls.length === 0);
   const agentOutput = stepResults.length > 0 && stepResults[stepResults.length - 1].output;
 

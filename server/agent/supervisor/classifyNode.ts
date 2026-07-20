@@ -17,9 +17,15 @@ import type {
   TaskClassification,
   TaskDomain,
   TaskComplexity,
+  ExecutionMode,
   PlanStep,
 } from "./state";
-import { callLLMStructured, callLightLLMStructured } from "../../llm/langchainAdapter";
+import {
+  COMPLEXITY_TO_EXECUTION_MODE,
+  EXECUTION_MODE_TO_COMPLEXITY,
+} from "./state";
+import { callLLMStructured } from "../../llm/langchainAdapter";
+import { classifyLLMCall } from "./classifyLLMCall";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import {
   getAgentCardRegistry,
@@ -594,9 +600,9 @@ function getClassifyPrompt(): string {
 export async function classifyNode(
   state: SupervisorStateType
 ): Promise<Partial<SupervisorStateType>> {
-  console.log("[ClassifyNode] Starting task classification...");
+  console.log("[ClassifyNode] Starting task classification (v1.3 preAnalysis-based)...");
 
-  // 1. 提取最新用户消�?
+  // 1. 提取最新用户消息
   const messages = state.messages;
   const lastUserMessage = [...messages]
     .reverse()
@@ -607,7 +613,229 @@ export async function classifyNode(
       ? lastUserMessage.content
       : JSON.stringify(lastUserMessage?.content || "");
 
-  // 2. 附加上下文信�?
+  // 2. 评测开关：DISABLE_SHORTCUTS=true 时关闭 scene activation + canShortCircuit
+  const shortcutsEnabled = process.env.DISABLE_SHORTCUTS !== "true";
+
+  // 3. v1.3 新增：场景激活短路（优先使用 preAnalysisNode 填充的 sceneActivationResult）
+  if (shortcutsEnabled && state.sceneActivationResult && state.sceneActivationResult.matches.length > 0) {
+    const match = state.sceneActivationResult.matches[0];
+    console.log(
+      `[ClassifyNode] Scene activation matched (v1.3 preAnalysis): sceneName="${match.sceneName}", memoryId=${match.memoryId}`
+    );
+    const sceneClassification: TaskClassification = {
+      domain: "general",
+      executionMode: "plan",
+      complexity: "complex",
+      reasoning: `[rule:scene_activation] 用户触发已保存场景「${match.sceneName}」`,
+      requiredAgents: ["generalAgent"],
+    };
+    const scenePlan: PlanStep[] = [{
+      id: 1,
+      description: `执行已保存的场景「${match.sceneName}」：${userText}。请先调用 memory_search 检索该场景的完整步骤（kind=episodic, type=behavior, query="${match.sceneName}"），然后按步骤逐一向用户确认并执行。`,
+      targetAgent: "generalAgent",
+      expectedTools: ["memory_search"],
+      dependsOn: [],
+      inputMapping: {},
+    }];
+    return {
+      taskClassification: sceneClassification,
+      plan: scenePlan,
+    };
+  }
+
+  // 4. V4 兼容：相似度短路（仍生效，作为 preAnalysis 未命中时的 fallback）
+  if (shortcutsEnabled) {
+    const shortCircuit = canShortCircuit(userText);
+    if (shortCircuit.ok && shortCircuit.domain && shortCircuit.agent) {
+      const resolvedDomain = shortCircuit.domain === "vehicle_control" ? "multimedia" : shortCircuit.domain;
+      const resolvedAgent = shortCircuit.domain === "vehicle_control" ? "multimediaAgent" : shortCircuit.agent;
+      console.log(
+        `[ClassifyNode] Short-circuit: domain=${resolvedDomain}, agent=${resolvedAgent}, top=${shortCircuit.topScores.map((s) => `${s.domain}:${s.score.toFixed(3)}`).join(",")}`
+      );
+      const shortClassification: TaskClassification = {
+        domain: resolvedDomain as TaskDomain,
+        executionMode: "single",
+        complexity: "simple",
+        reasoning: `[rule:similarity_short_circuit] 相似度短路命中 top=${shortCircuit.topScores[0]?.score.toFixed(3)}`,
+        requiredAgents: [resolvedAgent],
+      };
+      let scPlan: PlanStep[] = [
+        {
+          id: 1,
+          description: userText,
+          targetAgent: resolvedAgent,
+          expectedTools: [],
+          dependsOn: [],
+          inputMapping: {},
+        },
+      ];
+      scPlan = appendGeneralAgentMemoryStepIfNeeded(state, scPlan);
+      return {
+        taskClassification: shortClassification,
+        plan: scPlan,
+      };
+    }
+  }
+
+  const registry = getAgentCardRegistry();
+
+  // 5. v1.3 核心变更：从 preAnalysisResult 构建初始 classification（不再调 LLM）
+  let classification: TaskClassification;
+  let preAnalysisSource: string = "unknown";
+
+  if (state.preAnalysisResult) {
+    const pa = state.preAnalysisResult;
+    preAnalysisSource = pa.source;
+    const executionMode: ExecutionMode = inferExecutionMode(pa.requiredAgents);
+    const complexity: TaskComplexity = EXECUTION_MODE_TO_COMPLEXITY[executionMode];
+    const requiredAgents = pa.requiredAgents.length > 0 ? pa.requiredAgents : ["generalAgent"];
+    classification = {
+      domain: pa.domain,
+      executionMode,
+      complexity,
+      reasoning: pa.reasoning
+        ? `[preAnalysis:${pa.source}] ${pa.reasoning}`
+        : `[preAnalysis:${pa.source}] domain=${pa.domain}, agents=${requiredAgents.join(",")}, confidence=${pa.confidence.toFixed(2)}`,
+      requiredAgents,
+    };
+  } else {
+    // 兼容降级：preAnalysis 未运行（preAnalysisNode 未接入或失败）时走原 LLM 路径
+    console.warn(
+      "[ClassifyNode] preAnalysisResult 缺失，降级到 LLM 分类（v1.3 应保证 preAnalysisNode 已执行）"
+    );
+    try {
+      const fullMessage = composeFullMessage(state, userText);
+      const classifyPrompt = getClassifyPrompt();
+      classification = await classifyLLMCall<TaskClassification>(
+        classifyPrompt,
+        fullMessage,
+        { temperature: 0.1 }
+      );
+      // v1.3 兼容：填充 executionMode
+      if (!classification.executionMode) {
+        classification.executionMode = COMPLEXITY_TO_EXECUTION_MODE[classification.complexity || "simple"];
+      }
+    } catch (error) {
+      console.error(
+        "[ClassifyNode] LLM fallback classification failed:",
+        (error as Error).message
+      );
+      classification = {
+        domain: "general",
+        executionMode: "single",
+        complexity: "simple",
+        reasoning: `Classification failed: ${(error as Error).message}. Falling back to general agent.`,
+        requiredAgents: ["generalAgent"],
+      };
+    }
+  }
+
+  // 6. 验证分类 domain（preAnalysis 可能输出未注册 domain）
+  const validDomains = collectValidClassificationDomains(registry);
+  if (!validDomains.has(classification.domain)) {
+    classification.domain = "general";
+  }
+
+  // 7. 应用 8 个 refine 函数（与原逻辑一致）
+  refineClassificationForMusicIntent(userText, classification);
+  refineClassificationForDiskIntent(userText, classification);
+  refineClassificationForDirectoryInventoryIntent(userText, classification);
+  refineClassificationForNewsIntent(userText, classification);
+  refineClassificationForWeatherIntent(userText, classification);
+  refineClassificationForVehicleControl(userText, classification);
+  refineClassificationForFollowUp(userText, classification, messages);
+  refineClassificationBySimilarity(userText, classification);
+
+  // 8. 验证 requiredAgents
+  if (
+    !classification.requiredAgents ||
+    classification.requiredAgents.length === 0
+  ) {
+    classification.requiredAgents = resolveAgentsForDomain(
+      classification.domain,
+      registry
+    );
+  } else if (registry.size() > 0) {
+    const validatedAgents = classification.requiredAgents.filter((agentId) =>
+      registry.has(agentId)
+    );
+    if (validatedAgents.length === 0) {
+      classification.requiredAgents = resolveAgentsForDomain(
+        classification.domain,
+        registry
+      );
+    } else {
+      classification.requiredAgents = validatedAgents;
+    }
+  }
+
+  // 9. 同步 executionMode ↔ complexity（保持双向一致）
+  classification.executionMode = inferExecutionMode(classification.requiredAgents);
+  classification.complexity = EXECUTION_MODE_TO_COMPLEXITY[classification.executionMode];
+
+  console.log(
+    `[ClassifyNode] Classification: domain=${classification.domain}, executionMode=${classification.executionMode}, complexity=${classification.complexity}, agents=${classification.requiredAgents.join(",")}, preAnalysisSource=${preAnalysisSource}`
+  );
+
+  // 10. 计划生成（基于 executionMode 而非 complexity）
+  if (classification.executionMode === "single") {
+    const defaultPlan: PlanStep[] = [
+      {
+        id: 1,
+        description: userText,
+        targetAgent: classification.requiredAgents[0] || "generalAgent",
+        expectedTools: [],
+        dependsOn: [],
+        inputMapping: {},
+      },
+    ];
+    return {
+      taskClassification: classification,
+      plan: appendGeneralAgentMemoryStepIfNeeded(state, defaultPlan),
+    };
+  }
+
+  if (classification.executionMode === "parallel") {
+    // v1.3 新增：多 Agent 并行执行，每个 Agent 一步
+    const parallelPlan: PlanStep[] = classification.requiredAgents.map((agent, idx) => ({
+      id: idx + 1,
+      description: userText,
+      targetAgent: agent,
+      expectedTools: [],
+      dependsOn: [],
+      inputMapping: {},
+    }));
+    return {
+      taskClassification: classification,
+      plan: appendGeneralAgentMemoryStepIfNeeded(state, parallelPlan),
+    };
+  }
+
+  // executionMode === "plan"：交给 planStep 节点生成多步计划
+  return {
+    taskClassification: classification,
+  };
+}
+
+/**
+ * v1.3 新增：根据 requiredAgents 推断 executionMode
+ *
+ * - 0 个 Agent → "single"（降级到 generalAgent）
+ * - 1 个 Agent → "single"
+ * - 2+ 个 Agent → "parallel"
+ *
+ * 注：plan 模式由 classifyNode 内部显式设置（如 sceneActivation special plan），
+ * 不通过 requiredAgents 长度推断。
+ */
+function inferExecutionMode(requiredAgents: string[]): ExecutionMode {
+  if (requiredAgents.length <= 1) return "single";
+  return "parallel";
+}
+
+/**
+ * v1.3 新增：拼装完整消息（LLM fallback 路径用）
+ */
+function composeFullMessage(state: SupervisorStateType, userText: string): string {
   let contextInfo = "";
   if (state.context) {
     if (state.context.location) {
@@ -615,10 +843,7 @@ export async function classifyNode(
     }
     contextInfo += `\n当前时间: ${state.context.currentTime}`;
   }
-
-  // 3. V3 新增：构建最近对话摘�?
-  const conversationSummary = buildRecentConversationSummary(messages);
-
+  const conversationSummary = buildRecentConversationSummary(state.messages);
   let fullMessage = userText;
   if (conversationSummary) {
     fullMessage = `${userText}\n\n[对话上下文]\n${conversationSummary}`;
@@ -626,240 +851,7 @@ export async function classifyNode(
   if (contextInfo) {
     fullMessage += `\n\n[上下文信息]${contextInfo}`;
   }
-
-  // 4. 获取动�?Prompt 并调�?LLM
-  const classifyPrompt = getClassifyPrompt();
-  // V6 新增：场景名称快速匹配——用户说出已保存场景的名称时直接路由到 generalAgent 执行场景
-  // 例："打开午睡模式" "启动离车模式" "执行午睡场景"
-  const sceneActivationMatch = /^(?:打开|启动|执行|开启|运行|触发)?\s*(.{2,20}?)\s*(?:模式|场景|流程)?$/.exec(userText.trim());
-  if (sceneActivationMatch) {
-    const userId = state.context?.userId ? Number(state.context.userId) : 0;
-    if (userId > 0) {
-      try {
-        const sceneResults = await searchSceneEpisodes({ userId, query: userText.trim(), limit: 3 });
-        const matched = sceneResults.find((m) => {
-          const meta = (m.metadata ?? {}) as Record<string, unknown>;
-          const sceneName = String(meta.sceneName ?? "");
-          if (!sceneName) return false;
-          const t = userText.trim();
-          // 直接包含场景名称，或场景名称包含用户输入的核心词
-          return t.includes(sceneName) || sceneName.includes(sceneActivationMatch[1] ?? "");
-        });
-        if (matched) {
-          const meta = (matched.metadata ?? {}) as Record<string, unknown>;
-          console.log(`[ClassifyNode] Scene activation matched: "${meta.sceneName}" (memoryId=${matched.id}), routing to generalAgent`);
-          const sceneClassification: TaskClassification = {
-            domain: "general",
-            complexity: "simple",
-            reasoning: `[rule:scene_activation] 用户触发已保存场景「${meta.sceneName}」`,
-            requiredAgents: ["generalAgent"],
-          };
-          const scenePlan: PlanStep[] = [{
-            id: 1,
-            description: `执行已保存的场景「${meta.sceneName}」：${userText}。请先调用 memory_search 检索该场景的完整步骤（kind=episodic, type=behavior, query="${meta.sceneName}"），然后按步骤逐一向用户确认并执行。`,
-            targetAgent: "generalAgent",
-            expectedTools: ["memory_search"],
-            dependsOn: [],
-            inputMapping: {},
-          }];
-          return {
-            taskClassification: sceneClassification,
-            plan: scenePlan,
-          };
-        }
-      } catch (e) {
-        console.warn("[ClassifyNode] Scene activation search failed:", (e as Error).message);
-      }
-    }
-  }
-
-  // V4 新增：在调用 LLM 之前，尝试基于相似度进行"短路"补充
-  // 仅在极高置信度命中时生效，避免误警。
-  const shortCircuit = canShortCircuit(userText);
-  if (shortCircuit.ok && shortCircuit.domain && shortCircuit.agent) {
-    // vehicle_control 域映射到 multimediaAgent（它具备车控工具）
-    const resolvedDomain = shortCircuit.domain === "vehicle_control" ? "multimedia" : shortCircuit.domain;
-    const resolvedAgent = shortCircuit.domain === "vehicle_control" ? "multimediaAgent" : shortCircuit.agent;
-    console.log(
-      `[ClassifyNode] Short-circuit: domain=${resolvedDomain}, agent=${resolvedAgent}, top=${shortCircuit.topScores.map((s) => `${s.domain}:${s.score.toFixed(3)}`).join(",")}`
-    );
-    const shortClassification: TaskClassification = {
-      domain: resolvedDomain as TaskDomain,
-      complexity: "simple",
-      reasoning: `[rule:similarity_short_circuit] 相似度短路命中 top=${shortCircuit.topScores[0]?.score.toFixed(3)}`,
-      requiredAgents: [resolvedAgent],
-    };
-    let scPlan: PlanStep[] = [
-      {
-        id: 1,
-        description: userText,
-        targetAgent: resolvedAgent,
-        expectedTools: [],
-        dependsOn: [],
-        inputMapping: {},
-      },
-    ];
-    scPlan = appendGeneralAgentMemoryStepIfNeeded(state, scPlan);
-    return {
-      taskClassification: shortClassification,
-      plan: scPlan,
-    };
-  }
-
-  try {
-    // 优化：使用百炼平台轻量 LLM（qwen-turbo）进行意图分类，降低延迟
-    const classification = await callLightLLMStructured<TaskClassification>(
-      classifyPrompt,
-      fullMessage,
-      { temperature: 0.1 }
-    );
-
-    const registry = getAgentCardRegistry();
-
-    // 5. 验证分类结果（内置领�?+ 已启�?Agent Card �?domain�?
-    const validDomains = collectValidClassificationDomains(registry);
-    const validComplexities: TaskComplexity[] = [
-      "simple",
-      "moderate",
-      "complex",
-    ];
-
-    if (!validDomains.has(classification.domain)) {
-      classification.domain = "general";
-    }
-    if (!validComplexities.includes(classification.complexity)) {
-      classification.complexity = "simple";
-    }
-
-    refineClassificationForMusicIntent(userText, classification);
-    refineClassificationForDiskIntent(userText, classification);
-    refineClassificationForDirectoryInventoryIntent(userText, classification);
-    // V3 新增：新闻意图纠偏
-    refineClassificationForNewsIntent(userText, classification);
-    // V4 新增：天气查询强制路由到 navigationAgent
-    refineClassificationForWeatherIntent(userText, classification);
-    // V5 新增：车控/座舱控制指令强制路由到 multimediaAgent（在 music 纠偏之后，防止车控被误判为音乐）
-    refineClassificationForVehicleControl(userText, classification);
-    // V3 新增：follow-up 意图延续纠偏
-    refineClassificationForFollowUp(userText, classification, messages);
-    // V4 新增：相似度二次纠偏（在所有规则纠偏之后底底应用）
-    refineClassificationBySimilarity(userText, classification);
-
-    // 验证 requiredAgents：确保引用的 Agent 在注册表中存�?
-    if (
-      !classification.requiredAgents ||
-      classification.requiredAgents.length === 0
-    ) {
-      classification.requiredAgents = resolveAgentsForDomain(
-        classification.domain,
-        registry
-      );
-    } else if (registry.size() > 0) {
-      // 过滤掉注册表中不存在�?Agent
-      const validatedAgents = classification.requiredAgents.filter((agentId) =>
-        registry.has(agentId)
-      );
-      if (validatedAgents.length === 0) {
-        classification.requiredAgents = resolveAgentsForDomain(
-          classification.domain,
-          registry
-        );
-      } else {
-        classification.requiredAgents = validatedAgents;
-      }
-    }
-
-    console.log(
-      `[ClassifyNode] Classification: domain=${classification.domain}, complexity=${classification.complexity}, agents=${classification.requiredAgents.join(",")}`
-    );
-
-    // 6. 对于 simple 任务，生成默认的单步计划
-    if (classification.complexity === "simple") {
-      let defaultPlan: PlanStep[] = [
-        {
-          id: 1,
-          description: userText,
-          targetAgent: classification.requiredAgents[0] || "generalAgent",
-          expectedTools: [],
-          dependsOn: [],
-          inputMapping: {},
-        },
-      ];
-
-      defaultPlan = appendGeneralAgentMemoryStepIfNeeded(state, defaultPlan);
-
-      return {
-        taskClassification: classification,
-        plan: defaultPlan,
-      };
-    }
-
-    return {
-      taskClassification: classification,
-    };
-  } catch (error) {
-    console.error(
-      "[ClassifyNode] Classification failed, falling back to general:",
-      (error as Error).message
-    );
-
-    const registry = getAgentCardRegistry();
-
-    // 降级处理：先�?general，再应用音乐/磁盘纠偏（否则「分�?C 盘」会走错 generalAgent、无法调 get_disk_health�?
-    const fallback: TaskClassification = {
-      domain: "general",
-      complexity: "simple",
-      reasoning: `Classification failed: ${(error as Error).message}. Falling back to general agent.`,
-      requiredAgents: ["generalAgent"],
-    };
-
-    refineClassificationForMusicIntent(userText, fallback);
-    refineClassificationForDiskIntent(userText, fallback);
-    refineClassificationForDirectoryInventoryIntent(userText, fallback);
-    // V3 新增：新闻意图纠�?
-    refineClassificationForNewsIntent(userText, fallback);
-    // 天气查询强制路由
-    refineClassificationForWeatherIntent(userText, fallback);
-    // V3 新增：降级时也应�?follow-up 纠偏
-    refineClassificationForFollowUp(userText, fallback, messages);
-    // V4 新增：降级时也应用相似度纠偏
-    refineClassificationBySimilarity(userText, fallback);
-
-    if (!fallback.requiredAgents || fallback.requiredAgents.length === 0) {
-      fallback.requiredAgents = resolveAgentsForDomain(
-        fallback.domain,
-        registry
-      );
-    } else {
-      const validated = fallback.requiredAgents.filter((id) =>
-        registry.has(id)
-      );
-      fallback.requiredAgents =
-        validated.length > 0
-          ? validated
-          : resolveAgentsForDomain(fallback.domain, registry);
-    }
-
-    const targetAgent = fallback.requiredAgents[0] || "generalAgent";
-
-    let defaultPlan: PlanStep[] = [
-      {
-        id: 1,
-        description: userText,
-        targetAgent,
-        expectedTools: [],
-        dependsOn: [],
-        inputMapping: {},
-      },
-    ];
-
-    defaultPlan = appendGeneralAgentMemoryStepIfNeeded(state, defaultPlan);
-
-    return {
-      taskClassification: fallback,
-      plan: defaultPlan,
-    };
-  }
+  return fullMessage;
 }
 
 /**
@@ -876,6 +868,22 @@ export function routeByComplexity(
     return "execute";
   }
   return "plan";
+}
+
+/**
+ * v1.3 新增：基于 executionMode 路由（推荐使用，替代 routeByComplexity）
+ *
+ * - single/parallel → execute
+ * - plan → planStep
+ * - 缺失 → execute（安全降级）
+ */
+export function routeByExecutionMode(
+  state: SupervisorStateType
+): "execute" | "plan" {
+  const tc = state?.taskClassification;
+  if (!tc) return "execute";
+  if (tc.executionMode === "plan") return "plan";
+  return "execute";
 }
 
 /** 内置分类领域 + �?Agent Card 声明�?domain，供 LLM 输出校验 */

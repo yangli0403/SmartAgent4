@@ -105,7 +105,8 @@ export async function reflectionNode(
   const sessionId = context?.sessionId || "unknown";
 
   const hasFailures = (stepResults || []).some((r) => r.status !== "success");
-  const isComplexTask = taskClassification?.complexity === "complex";
+  // v1.3：executionMode 替代 complexity（"plan" mode ↔ complex）
+  const isComplexTask = taskClassification?.executionMode === "plan";
   const llmReflectionTriggered = Boolean(hasFailures || isComplexTask);
 
   // ===== 异步执行反思（fire-and-forget） =====
@@ -178,7 +179,8 @@ async function performReflection(
 
   // ===== 3. LLM 反思分析（仅在有失败或复杂任务时触发） =====
   const hasFailures = stepResults.some((r) => r.status !== "success");
-  const isComplexTask = taskClassification?.complexity === "complex";
+  // v1.3：executionMode === "plan" 替代 complexity === "complex"
+  const isComplexTask = taskClassification?.executionMode === "plan";
 
   if (hasFailures || isComplexTask) {
     await performLLMReflection(
@@ -308,8 +310,9 @@ function buildReflectionInput(
   parts.push(
     `- 领域: ${taskClassification?.domain || "unknown"}`
   );
+  // v1.3：executionMode 替代 complexity
   parts.push(
-    `- 复杂度: ${taskClassification?.complexity || "unknown"}`
+    `- 执行模式: ${taskClassification?.executionMode || "unknown"}`
   );
 
   parts.push(`\n## 执行步骤 (${stepResults.length} 步)`);

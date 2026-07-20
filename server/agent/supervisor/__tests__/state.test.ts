@@ -21,19 +21,19 @@ describe("Supervisor State Types", () => {
     it("应能创建有效的分类对象", () => {
       const classification: TaskClassification = {
         domain: "navigation",
-        complexity: "moderate",
+        executionMode: "parallel",
         reasoning: "用户要求搜索充电桩，属于导航领域",
         requiredAgents: ["navigationAgent"],
       };
       expect(classification.domain).toBe("navigation");
-      expect(classification.complexity).toBe("moderate");
+      expect(classification.executionMode).toBe("parallel");
       expect(classification.requiredAgents).toContain("navigationAgent");
     });
 
     it("cross_domain 应支持多个 Agent", () => {
       const classification: TaskClassification = {
         domain: "cross_domain",
-        complexity: "complex",
+        executionMode: "plan",
         reasoning: "跨领域任务",
         requiredAgents: ["navigationAgent", "fileAgent", "multimediaAgent"],
       };

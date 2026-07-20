@@ -253,7 +253,7 @@ router.post('/stream-enhanced', async (req: Request, res: Response) => {
 
     // 计算复杂度
     const complexity = complexityCalculator.calculate(message);
-    res.write(`data: ${JSON.stringify({ type: 'complexity', complexity })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'complexity', complexity, sseSchemaVersion: 'v1.3' })}\n\n`);
 
     // 获取记忆（增强聊天暂不额外检索记忆，传入空数组占位）
     const memories: any[] = [];
@@ -290,7 +290,7 @@ router.post('/stream-enhanced', async (req: Request, res: Response) => {
     }
 
     // 发送完成信号
-    res.write(`data: ${JSON.stringify({ type: 'complete', done: true, thinking: thinkingResult ? { taskId: thinkingResult.taskId, totalDuration: thinkingResult.totalDuration } : null })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'complete', done: true, sseSchemaVersion: 'v1.3', thinking: thinkingResult ? { taskId: thinkingResult.taskId, totalDuration: thinkingResult.totalDuration } : null })}\n\n`);
 
     // 更新会话历史
     conversationHistory.push({ role: 'user', content: message });

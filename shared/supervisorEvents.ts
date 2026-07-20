@@ -25,7 +25,9 @@ export type SupervisorEventType =
   | "memory_extracted"
   | "final"
   | "error"
-  | "proactive_suggest";
+  | "proactive_suggest"
+  /** v1.3 新增：preAnalysisNode 4 路流水线产物 */
+  | "preAnalysis";
 
 /** 标准事件信封（SSE / 进程内 EventBus 共用） */
 export interface SupervisorEventEnvelope<P = unknown> {

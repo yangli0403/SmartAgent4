@@ -42,7 +42,9 @@ export type ChatThinkingPhase =
   | "memory_extracted"
   | "completed"
   | "error"
-  | "proactive_suggest";
+  | "proactive_suggest"
+  /** v1.3 新增：preAnalysisNode 阶段 */
+  | "preAnalysis";
 
 /** 单条思考事件细节（思考气泡内累积多条） */
 export interface ChatThinkingDetail {

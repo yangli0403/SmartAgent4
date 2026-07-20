@@ -57,15 +57,15 @@ const STATIC_CLASSIFY_PROMPT = `你是一个智能任务分类器。根据用户
 - 例：上一轮 navigationAgent 问「请问您的出发地是哪里」，用户回复「我在望京」→ 应判为 **navigation**，不是 general。
 - 判断依据：用户消息是否在回答上一轮 AI 的提问，而非发起全新话题。
 
-## 复杂度判断规则
-- simple: 单一领域、单步操作（如"今天天气怎么样"）
-- moderate: 单一领域、多步操作（如"搜索附近餐厅并导航到最近的"）
-- complex: 跨领域或需要多个 Agent 协作（如"查天气然后创建文件记录"）
+## 执行模式判断规则
+- single: 单一领域、单步操作（如"今天天气怎么样"）
+- parallel: 单一领域、多步并行（如"搜索附近餐厅并导航到最近的"）
+- plan: 跨领域或需要多个 Agent 协作（如"查天气然后创建文件记录"）
 
 ## 输出格式（严格 JSON）
 {
   "domain": "navigation|multimedia|file_system|general|cross_domain",
-  "complexity": "simple|moderate|complex",
+  "executionMode": "single|parallel|plan",
   "reasoning": "分类推理过程",
   "requiredAgents": ["需要调用的Agent列表"]
 }
@@ -153,15 +153,15 @@ ${agentDescriptions}
 - 例：上一轮 navigationAgent 问「请问您的出发地是哪里」，用户回复「我在望京」→ 应判为 **navigation**，不是 general。
 - 判断依据：用户消息是否在回答上一轮 AI 的提问，而非发起全新话题。
 
-## 复杂度判断规则
-- simple: 单一领域、单步操作（如"今天天气怎么样"）
-- moderate: 单一领域、多步操作（如"搜索附近餐厅并导航到最近的"）
-- complex: 跨领域或需要多个 Agent 协作（如"查天气然后创建文件记录"）
+## 执行模式判断规则
+- single: 单一领域、单步操作（如"今天天气怎么样"）
+- parallel: 单一领域、多步并行（如"搜索附近餐厅并导航到最近的"）
+- plan: 跨领域或需要多个 Agent 协作（如"查天气然后创建文件记录"）
 
 ## 输出格式（严格 JSON）
 {
   "domain": "navigation|multimedia|file_system|general|cross_domain",
-  "complexity": "simple|moderate|complex",
+  "executionMode": "single|parallel|plan",
   "reasoning": "分类推理过程",
   "requiredAgents": [${agentIds.map((id) => `"${id}"`).join(", ")}]
 }

@@ -65,6 +65,10 @@ const DEFAULT_CONFIG: Required<PreRetrievalConfig> = {
  * 闲聊模式正则表达式集合
  *
  * 匹配明显不需要记忆检索的用户输入
+ *
+ * @deprecated v1.3：v1.3+ 新增 preAnalysis 节点的 RuleLayer 接管（详见 server/agent/preAnalysis/rules/ruleLayer.ts）
+ *                 该正则集合保留作为 Pre-Retrieval Decision 的兜底，
+ *                 新规则请写到 RuleLayer；M5 阶段将完全迁移并删除此处
  */
 const CHITCHAT_PATTERNS: RegExp[] = [
   // 问候语
@@ -120,6 +124,10 @@ const CHITCHAT_PATTERNS: RegExp[] = [
  * 记忆相关模式正则表达式集合
  *
  * 匹配明显需要记忆检索的用户输入
+ *
+ * @deprecated v1.3：v1.3+ 新增 preAnalysis 节点的 RuleLayer 接管（详见 server/agent/preAnalysis/rules/ruleLayer.ts）
+ *                 该正则集合保留作为 Pre-Retrieval Decision 的兜底，
+ *                 新规则请写到 RuleLayer；M5 阶段将完全迁移并删除此处
  */
 const MEMORY_RELATED_PATTERNS: RegExp[] = [
   // 明确的记忆查询

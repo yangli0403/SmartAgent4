@@ -77,13 +77,13 @@ describe("DynamicPromptAssembler", () => {
       expect(prompt).toContain("cross_domain");
     });
 
-    it("应包含复杂度判断规则", () => {
+    it("应包含执行模式判断规则", () => {
       registry.register(createTestCard());
       const prompt = assembler.buildClassifyPrompt();
 
-      expect(prompt).toContain("simple");
-      expect(prompt).toContain("moderate");
-      expect(prompt).toContain("complex");
+      expect(prompt).toContain("single");
+      expect(prompt).toContain("parallel");
+      expect(prompt).toContain("plan");
     });
 
     it("应包含 JSON 输出格式要求", () => {
@@ -91,7 +91,7 @@ describe("DynamicPromptAssembler", () => {
       const prompt = assembler.buildClassifyPrompt();
 
       expect(prompt).toContain("domain");
-      expect(prompt).toContain("complexity");
+      expect(prompt).toContain("executionMode");
       expect(prompt).toContain("reasoning");
       expect(prompt).toContain("requiredAgents");
     });
@@ -222,7 +222,7 @@ describe("DynamicPromptAssembler", () => {
 
       expect(payload.staticSystemPrompt).toContain("智能任务分类器");
       expect(payload.staticSystemPrompt).toContain("领域分类规则");
-      expect(payload.staticSystemPrompt).toContain("复杂度判断规则");
+      expect(payload.staticSystemPrompt).toContain("执行模式判断规则");
       expect(payload.staticSystemPrompt).toContain("输出格式");
     });
 

@@ -158,6 +158,10 @@ export const DEFAULT_CANDIDATES: IntentCandidate[] = [
 /**
  * 记忆/偏好引用类正则：命中后倾向归到 general 域，
  * 避免被 LLM 误判成 navigation/multimedia。
+ *
+ * @deprecated v1.3：v1.3+ 新增 preAnalysis 节点的 RuleLayer 接管（详见 server/agent/preAnalysis/rules/ruleLayer.ts）
+ *                 该正则集合保留作为 intentSimilarity 的兜底，
+ *                 新规则请写到 RuleLayer；M5 阶段将完全迁移并删除此处
  */
 export const MEMORY_GUARD_PATTERNS: RegExp[] = [
   /你还?记得|记不记得|我.*(之前|以前|上次|昨晚|昨天).*(说|提|聊|告诉|路线)/,

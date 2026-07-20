@@ -6,6 +6,11 @@
  * SmartAgent4 V2 增强流程：
  * START → contextEnrich → classify → [plan | execute] → execute → replan → [execute | respond] → memoryExtract → reflection → END
  *
+ * v1.3 改造（M4 阶段）：
+ * - 在最前面加 preAnalysis 节点（preAnalysisNode → 4 路流水线）
+ * - 流程变更为：START → preAnalysis → contextEnrich → classify → [plan | execute] → ...
+ * - routeByComplexity → routeByExecutionMode（基于 preAnalysis 输出 + TaskClassification.executionMode）
+ *
  * V2 改造：
  * - execute 节点从串行 createExecuteNode 替换为并行 createParallelExecuteNode
  * - 图构建参数从旧 AgentRegistry (Record<string, Agent>) 改为 IAgentCardRegistry
@@ -15,7 +20,7 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
 import { traceable } from "langsmith/traceable";
 import { SupervisorState, type UserContext } from "./state";
-import { classifyNode, routeByComplexity } from "./classifyNode";
+import { classifyNode } from "./classifyNode";
 import { planNode } from "./planNode";
 import { createExecuteNode, type AgentRegistry } from "./executeNode";
 import { replanNode, shouldContinueAfterReplan } from "./replanNode";
@@ -23,6 +28,7 @@ import { respondNode } from "./respondNode";
 import { contextEnrichNode } from "./contextEnrichNode";
 import { memoryExtractionNode } from "./memoryExtractionNode";
 import { reflectionNode } from "./reflectionNode";
+import { createPreAnalysisNode } from "../preAnalysis/node/preAnalysisNode";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
 import type { MultimodalSegment } from "../../emotions/types";
@@ -30,7 +36,7 @@ import type { IAgentCardRegistry } from "../discovery/types";
 import { createParallelExecuteNode } from "../discovery/parallelExecuteEngine";
 
 /**
- * 构建 Supervisor 图（V2 — 支持并行执行）
+ * 构建 Supervisor 图（V2 — 支持并行执行 + v1.3 preAnalysis）
  *
  * @param agentSource - Agent 来源，支持新旧两种注册表
  * @returns 编译后的 LangGraph 图
@@ -56,8 +62,58 @@ export function buildSupervisorGraph(
     executeNode = createExecuteNode(agentSource as AgentRegistry);
   }
 
+  // v1.3 改造：在最前面加 preAnalysis 节点（4 路流水线：Prefetch → Rule → Similarity → LLM）
+  const preAnalysis = createPreAnalysisNode({
+    mode: "llm",
+    enableMetrics: true,
+  });
+
+  const preAnalysisNodeFn = async (state: any) => {
+    // 提取最新用户消息文本
+    const messages = (state.messages || []) as BaseMessage[];
+    const lastUserMessage = [...messages]
+      .reverse()
+      .find((m: any) => m._getType?.() === "human" || m.constructor?.name === "HumanMessage");
+    const userText =
+      typeof lastUserMessage?.content === "string"
+        ? lastUserMessage.content
+        : JSON.stringify(lastUserMessage?.content || "");
+
+    const userId = state.context?.userId ? Number(state.context.userId) : undefined;
+
+    const result = await preAnalysis.analyze({
+      userText,
+      userId,
+      tenantId: state.context?.tenantId,
+      conversationSummary: state.context?.conversationSummary,
+      dialogueHistory: messages.slice(-6).map((m: any) => ({
+        role: m._getType?.() === "human" ? "user" : "assistant",
+        content: typeof m.content === "string" ? m.content : "",
+      })),
+    });
+
+    // M2-02：等待 scene activation 异步查询（设上限 200ms 避免阻塞 classifyNode）
+    let sceneActivationResult: any = null;
+    if (result.sceneActivationPromise) {
+      try {
+        sceneActivationResult = await Promise.race([
+          result.sceneActivationPromise,
+          new Promise((resolve) => setTimeout(() => resolve(null), 200)),
+        ]);
+      } catch {
+        sceneActivationResult = null;
+      }
+    }
+
+    return {
+      preAnalysisResult: result.output,
+      sceneActivationResult,
+    };
+  };
+
   const graph = new StateGraph(SupervisorState)
     // 添加节点
+    .addNode("preAnalysis", preAnalysisNodeFn)
     .addNode("contextEnrich", contextEnrichNode)
     .addNode("classify", classifyNode)
     .addNode("planStep", planNode)
@@ -68,12 +124,13 @@ export function buildSupervisorGraph(
     .addNode("reflection", reflectionNode)
 
     // 定义边
-    // START → contextEnrich → classify
-    .addEdge(START, "contextEnrich")
+    // v1.3：START → preAnalysis → contextEnrich → classify
+    .addEdge(START, "preAnalysis")
+    .addEdge("preAnalysis", "contextEnrich")
     .addEdge("contextEnrich", "classify")
 
-    // classify → 根据复杂度路由
-    .addConditionalEdges("classify", routeByComplexity, {
+    // classify → 根据 executionMode 路由（v1.3 替代 routeByComplexity）
+    .addConditionalEdges("classify", routeByExecutionMode, {
       execute: "execute",
       plan: "planStep",
     })
@@ -96,6 +153,22 @@ export function buildSupervisorGraph(
     .addEdge("reflection", END);
 
   return graph.compile();
+}
+
+/**
+ * 路由：基于 TaskClassification.executionMode 决定走向（v1.3 替代 routeByComplexity）
+ *
+ * - "single" / "parallel" → execute（直接调度 Agent，无需 plan）
+ * - "plan" → planStep（多步骤计划）
+ * - 缺失/未知 → execute（安全降级）
+ */
+export function routeByExecutionMode(
+  state: any
+): "execute" | "plan" {
+  const tc = state?.taskClassification;
+  if (!tc) return "execute";
+  if (tc.executionMode === "plan") return "plan";
+  return "execute";
 }
 
 /**
@@ -125,9 +198,10 @@ export interface SupervisorInput {
 export interface SupervisorOutput {
   /** 最终回复文本（可能包含 [tag:value] 情感标签） */
   response: string;
-  /** 任务分类结果 */
+  /** 任务分类结果（v1.3 引入 executionMode） */
   classification: {
     domain: string;
+    executionMode: string;
     complexity: string;
   };
   /** 执行的步骤数 */
@@ -238,7 +312,8 @@ export const runSupervisor = traceable(
         "抱歉，我无法处理您的请求。请尝试重新描述。",
       classification: {
         domain: finalState.taskClassification?.domain || "unknown",
-        complexity: finalState.taskClassification?.complexity || "unknown",
+        executionMode: finalState.taskClassification?.executionMode || "single",
+        complexity: finalState.taskClassification?.complexity || "simple",
       },
       stepsExecuted: (finalState.stepResults || []).length,
       totalToolCalls,
@@ -262,7 +337,7 @@ export const runSupervisor = traceable(
 
     return {
       response: `抱歉，处理您的请求时遇到了问题：${(error as Error).message}。请稍后重试。`,
-      classification: { domain: "unknown", complexity: "unknown" },
+      classification: { domain: "unknown", executionMode: "single", complexity: "simple" },
       stepsExecuted: 0,
       totalToolCalls: 0,
       totalDurationMs,

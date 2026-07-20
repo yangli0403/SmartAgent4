@@ -110,7 +110,8 @@ export async function planNode(
   if (state.taskClassification) {
     planRequest += `\n\n任务分类信息:`;
     planRequest += `\n- 领域: ${state.taskClassification.domain}`;
-    planRequest += `\n- 复杂度: ${state.taskClassification.complexity}`;
+    // v1.3：executionMode 替代 complexity（通过映射换算显示，保持向后兼容）
+    planRequest += `\n- 执行模式: ${state.taskClassification.executionMode}`;
     planRequest += `\n- 推荐Agent: ${state.taskClassification.requiredAgents.join(", ")}`;
     planRequest += `\n- 分类推理: ${state.taskClassification.reasoning}`;
   }

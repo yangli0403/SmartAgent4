@@ -21,6 +21,10 @@
 import {
   publishSupervisorEvent,
 } from "./supervisorEventBus";
+import { CURRENT_SSE_SCHEMA_VERSION } from "../preAnalysis/sse/sseEventSchema";
+
+/** v1.3 修复 #11：所有 SSE 事件携带 sseSchemaVersion（CI gate 强约束） */
+const SSE_SCHEMA_VERSION = CURRENT_SSE_SCHEMA_VERSION;
 
 export interface StreamingContext {
   requestId: string;
@@ -38,6 +42,8 @@ export interface StreamingContext {
   finalPublished?: boolean;
   /** 是否已发布过 memory_recalled */
   memoryRecalledPublished?: boolean;
+  /** v1.3 新增：是否已发布过 preAnalysis */
+  preAnalysisPublished?: boolean;
   /** 是否已发布过 responding（开始生成最终回复） */
   respondingPublished?: boolean;
   /** responding 事件发出时刻，用于推算 LLM 生成耗时 */
@@ -55,6 +61,19 @@ export interface StreamUpdate {
     domain: string;
     complexity: string;
     reasoning?: string;
+    /** v1.3：executionMode 替代 complexity 作为权威字段 */
+    executionMode?: string;
+    /** v1.3：分类所需的 Agent 列表（用于前端展示） */
+    requiredAgents?: string[];
+  };
+  /** v1.3：preAnalysisNode 输出（4 路流水线产物） */
+  preAnalysisResult?: {
+    domain: string;
+    requiredAgents: string[];
+    memoryRelevant: boolean;
+    source: string;
+    confidence: number;
+    schemaVersion: string;
   };
   plan?: Array<{
     id: number;
@@ -103,7 +122,28 @@ export function publishEventsFromUpdates(
 ): number {
   let published = 0;
 
-  // 1. classified
+  // 0. preAnalysis【v1.3 新增】4 路流水线产物（prefetch/rule/llm/similarity）
+  if (update.preAnalysisResult && !ctx.preAnalysisPublished) {
+    const p = update.preAnalysisResult;
+    publishSupervisorEvent({
+      requestId: ctx.requestId,
+      type: "preAnalysis",
+      phase: "preAnalysis",
+      summary: `意图预分析：${p.source} · 置信度 ${p.confidence.toFixed(2)}`,
+      payload: {
+        domain: p.domain,
+        requiredAgents: p.requiredAgents,
+        memoryRelevant: p.memoryRelevant,
+        source: p.source,
+        confidence: p.confidence,
+        sseSchemaVersion: "v1.3",
+      },
+    });
+    ctx.preAnalysisPublished = true;
+    published++;
+  }
+
+  // 1. classified（v1.3 双写：保留 complexity + 新增 executionMode + sseSchemaVersion）
   if (update.taskClassification && !ctx.classifiedPublished) {
     const cls = update.taskClassification;
     const reasoningSnippet = cls.reasoning
@@ -114,16 +154,21 @@ export function publishEventsFromUpdates(
     );
     const displayDomain =
       cls.domain === "navigation" && isWeatherIntent ? "天气查询/出行服务" : cls.domain;
+    // v1.3：executionMode 替代 complexity 作为权威字段；保留 complexity 用于向后兼容
+    const executionMode = cls.executionMode ?? cls.complexity;
     publishSupervisorEvent({
       requestId: ctx.requestId,
       type: "classified",
       phase: "classified",
-      summary: `任务分类：${displayDomain}·${cls.complexity}${reasoningSnippet}`,
+      summary: `任务分类：${displayDomain}·${executionMode}${reasoningSnippet}`,
       payload: {
         domain: cls.domain,
         displayDomain,
         complexity: cls.complexity,
+        executionMode,
+        requiredAgents: cls.requiredAgents ?? [],
         reasoning: cls.reasoning ?? "",
+        sseSchemaVersion: "v1.3",
       },
     });
     ctx.classifiedPublished = true;

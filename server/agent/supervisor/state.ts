@@ -3,10 +3,16 @@
  *
  * 定义顶层 Supervisor 图的状态结构，包含任务分类、执行计划、
  * 步骤结果和用户上下文等信息。
+ *
+ * v1.3 改造：
+ * - 新增 preAnalysisResult 字段（preAnalysisNode 输出）
+ * - TaskClassification.complexity → executionMode（single | parallel | plan）
  */
 
 import { Annotation } from "@langchain/langgraph";
 import type { BaseMessage } from "@langchain/core/messages";
+import type { PreAnalyzerOutput } from "../preAnalysis/types/preAnalyzerOutput";
+import type { SceneActivationOutput } from "../preAnalysis/types/sceneActivationOutput";
 
 // ==================== 任务分类 ====================
 
@@ -17,14 +23,44 @@ import type { BaseMessage } from "@langchain/core/messages";
  */
 export type TaskDomain = string;
 
-/** 任务复杂度 */
+/**
+ * 执行模式（v1.3 替代 complexity 字段）
+ * - single: 单 Agent 直接执行（无 plan）
+ * - parallel: 多 Agent 并行执行（无 plan）
+ * - plan: 多步骤计划（进入 planStep 节点）
+ */
+export type ExecutionMode = "single" | "parallel" | "plan";
+
+/** 任务复杂度（v1.3 兼容保留，与 executionMode 同步） */
 export type TaskComplexity = "simple" | "moderate" | "complex";
+
+/**
+ * 复杂度 ↔ 执行模式 映射
+ * 保留 complexity 字段以兼容历史代码，下游消费方应优先读 executionMode
+ */
+export const COMPLEXITY_TO_EXECUTION_MODE: Record<TaskComplexity, ExecutionMode> = {
+  simple: "single",
+  moderate: "parallel",
+  complex: "plan",
+};
+
+export const EXECUTION_MODE_TO_COMPLEXITY: Record<ExecutionMode, TaskComplexity> = {
+  single: "simple",
+  parallel: "moderate",
+  plan: "complex",
+};
 
 /** Supervisor 对用户输入的分类结果 */
 export interface TaskClassification {
   /** 任务所属领域 */
   domain: TaskDomain;
-  /** 任务复杂度 */
+  /** 执行模式（v1.3 替代 complexity 作为权威字段） */
+  executionMode: ExecutionMode;
+  /**
+   * 任务复杂度（v1.3 兼容保留，与 executionMode 双向同步）
+   * 写入时同时设置 executionMode 和 complexity 即可保持兼容
+   * @deprecated 优先使用 executionMode
+   */
   complexity: TaskComplexity;
   /** 分类推理过程 */
   reasoning: string;
@@ -58,6 +94,8 @@ export interface ExecutionPlan {
   steps: PlanStep[];
   /** 预估复杂度 */
   estimatedComplexity: TaskComplexity;
+  /** 预估执行模式（v1.3 新增） */
+  estimatedExecutionMode: ExecutionMode;
 }
 
 // ==================== 步骤执行结果 ====================
@@ -297,6 +335,30 @@ export const SupervisorState = Annotation.Root({
   >({
     reducer: (_existing, incoming) => incoming,
     default: () => undefined,
+  }),
+
+  // ==================== v1.3 改造字段 ====================
+
+  /**
+   * 意图预分析结果（preAnalysisNode 输出，v1.3 引入）
+   *
+   * 下游 classifyNode/contextEnrichNode 据此构建 TaskClassification 和检索策略。
+   * 缺失时降级到原 behavior。
+   */
+  preAnalysisResult: Annotation<PreAnalyzerOutput | null>({
+    reducer: (_existing, incoming) => incoming,
+    default: () => null,
+  }),
+
+  /**
+   * 场景激活查询结果（v1.3 引入）
+   *
+   * 来自 preAnalysisNode 内的 fire-and-forget 异步查询。
+   * 命中时 classifyNode 生成 special plan（generalAgent + memory_search）。
+   */
+  sceneActivationResult: Annotation<SceneActivationOutput | null>({
+    reducer: (_existing, incoming) => incoming,
+    default: () => null,
   }),
 });
 

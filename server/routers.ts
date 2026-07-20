@@ -276,9 +276,10 @@ export const appRouter = router({
               : await getSmartAgentApp().chat(input.message, baseChatOpts);
             responseText = supervisorResult.response;
             agentDomain = supervisorResult.classification.domain;
-            agentComplexity = supervisorResult.classification.complexity;
+            // v1.3：executionMode 替代 complexity 作为权威字段
+            agentComplexity = supervisorResult.classification.executionMode || supervisorResult.classification.complexity;
             console.log(
-              `[Chat] Supervisor 完成: domain=${agentDomain}, complexity=${agentComplexity}, steps=${supervisorResult.stepsExecuted}, tools=${supervisorResult.totalToolCalls}`
+              `[Chat] Supervisor 完成: domain=${agentDomain}, executionMode=${agentComplexity}, steps=${supervisorResult.stepsExecuted}, tools=${supervisorResult.totalToolCalls}`
             );
           } catch (supervisorErr) {
             console.error("[Chat] Supervisor 失败，降级到旧 runAgent:", (supervisorErr as Error).message);
