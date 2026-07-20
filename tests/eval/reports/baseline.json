@@ -1,0 +1,488 @@
+{
+  "runId": "baseline_2026-06-10T10-15-22-296Z",
+  "config": {
+    "disableShortcuts": true,
+    "llmMode": "mock",
+    "seed": 42,
+    "totalCases": 610,
+    "mockSubMode": "groundTruth"
+  },
+  "summary": {
+    "domainAcc": 0.9737704918032787,
+    "complexityAcc": 0.9852459016393442,
+    "agentsExactAcc": 0.9737704918032787,
+    "fullAcc": 0.9737704918032787,
+    "correctCount": 594
+  },
+  "perDomain": {
+    "navigation": {
+      "precision": 0.9401709401709402,
+      "recall": 1,
+      "f1": 0.9691629955947136,
+      "support": 110
+    },
+    "multimedia": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 111
+    },
+    "file_system": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 93
+    },
+    "office": {
+      "precision": 1,
+      "recall": 0.9871794871794872,
+      "f1": 0.9935483870967742,
+      "support": 78
+    },
+    "service": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 60
+    },
+    "general": {
+      "precision": 0.8953488372093024,
+      "recall": 0.9166666666666666,
+      "f1": 0.9058823529411765,
+      "support": 84
+    },
+    "cross_domain": {
+      "precision": 1,
+      "recall": 0.8918918918918919,
+      "f1": 0.9428571428571428,
+      "support": 74
+    }
+  },
+  "perDomainMacro": {
+    "precision": 0.9765028253400346,
+    "recall": 0.9708197208197209,
+    "f1": 0.9730644112128297
+  },
+  "perDomainMicro": {
+    "precision": 0.9737704918032787,
+    "recall": 0.9737704918032787,
+    "f1": 0.9737704918032787
+  },
+  "confusionMatrix": {
+    "labels": [
+      "navigation",
+      "multimedia",
+      "file_system",
+      "office",
+      "service",
+      "general",
+      "cross_domain"
+    ],
+    "matrix": [
+      [
+        110,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        111,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        93,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        77,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        60,
+        0,
+        0
+      ],
+      [
+        7,
+        0,
+        0,
+        0,
+        0,
+        77,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        8,
+        66
+      ]
+    ]
+  },
+  "byQueryLength": {
+    "short": 0.976,
+    "medium": 0.9716981132075472,
+    "long": 0.9761904761904762
+  },
+  "byEdgeCase": {
+    "adv:cross_domain_camo": {
+      "acc": 0.875,
+      "total": 8
+    },
+    "adv:empty": {
+      "acc": 1,
+      "total": 2
+    },
+    "adv:extreme_long": {
+      "acc": 1,
+      "total": 1
+    },
+    "adv:irony": {
+      "acc": 1,
+      "total": 3
+    },
+    "adv:long_injection": {
+      "acc": 1,
+      "total": 4
+    },
+    "adv:noise_prefix": {
+      "acc": 1,
+      "total": 6
+    },
+    "adv:typo": {
+      "acc": 1,
+      "total": 6
+    },
+    "dir_inventory": {
+      "acc": 1,
+      "total": 8
+    },
+    "disk": {
+      "acc": 1,
+      "total": 8
+    },
+    "follow_up": {
+      "acc": 1,
+      "total": 12
+    },
+    "music": {
+      "acc": 1,
+      "total": 12
+    },
+    "news": {
+      "acc": 1,
+      "total": 12
+    },
+    "similarity": {
+      "acc": 1,
+      "total": 8
+    },
+    "vehicle": {
+      "acc": 1,
+      "total": 12
+    },
+    "weather": {
+      "acc": 1,
+      "total": 8
+    }
+  },
+  "refineHitRate": {
+    "news_intent": 0.014754098360655738,
+    "weather_intent": 0.011475409836065573
+  },
+  "shortCircuit": {
+    "count": 0,
+    "sceneActivation": 0
+  },
+  "latencyMs": {
+    "p50": 1,
+    "p95": 1,
+    "min": 0,
+    "max": 17
+  },
+  "errors": [
+    {
+      "id": "crs_0039",
+      "query": "能否帮我在飞书群里同步今天的新闻和明天日程，谢谢",
+      "expected": {
+        "domain": "cross_domain",
+        "complexity": "complex",
+        "requiredAgents": [
+          "fileAgent",
+          "multimediaAgent"
+        ]
+      },
+      "got": {
+        "domain": "general",
+        "complexity": "simple",
+        "requiredAgents": [
+          "generalAgent"
+        ],
+        "reasoning": "[rule:news_intent] [mock]"
+      },
+      "tags": [
+        "smoke",
+        "style:polite",
+        "length:medium",
+        "domain:cross_domain"
+      ]
+    },
+    {
+      "id": "crs_0040",
+      "query": "帮我在飞书群里同步今天的新闻和明天日程",
+      "expected": {
+        "domain": "cross_domain",
+        "complexity": "complex",
+        "requiredAgents": [
+          "fileAgent",
+          "multimediaAgent"
+        ]
+      },
+      "got": {
+        "domain": "general",
+        "complexity": "simple",
+        "requiredAgents": [
+          "generalAgent"
+        ],
+        "reasoning": "[rule:news_intent] [mock]"
+      },
+      "tags": [
+        "smoke",
+        "style:command",
+        "length:short",
+        "domain:cross_domain"
+      ]
+    },
+    {
+      "id": "crs_0041",
+      "query": "请帮我在飞书群里同步今天的新闻和明天日程，谢谢",
+      "expected": {
+        "domain": "cross_domain",
+        "complexity": "complex",
+        "requiredAgents": [
+          "fileAgent",
+          "navigationAgent"
+        ]
+      },
+      "got": {
+        "domain": "general",
+        "complexity": "simple",
+        "requiredAgents": [
+          "generalAgent"
+        ],
+        "reasoning": "[rule:news_intent] [mock]"
+      },
+      "tags": [
+        "smoke",
+        "style:polite",
+        "length:medium",
+        "domain:cross_domain"
+      ]
+    },
+    {
+      "id": "crs_0042",
+      "query": "麻烦你在飞书群里同步今天的新闻和明天日程",
+      "expected": {
+        "domain": "cross_domain",
+        "complexity": "complex",
+        "requiredAgents": [
+          "navigationAgent",
+          "serviceAgent"
+        ]
+      },
+      "got": {
+        "domain": "general",
+        "complexity": "simple",
+        "requiredAgents": [
+          "generalAgent"
+        ],
+        "reasoning": "[rule:news_intent] [mock]"
+      },
+      "tags": [
+        "smoke",
+        "style:command",
+        "length:short",
+        "domain:cross_domain"
+      ]
+    },
+    {
+      "id": "crs_0043",
+      "query": "可以帮我在飞书群里同步今天的新闻和明天日程，谢谢",
+      "expected": {
+        "domain": "cross_domain",
+        "complexity": "complex",
+        "requiredAgents": [
+          "serviceAgent",
+          "navigationAgent"
+        ]
+      },
+      "got": {
+        "domain": "general",
+        "complexity": "simple",
+        "requiredAgents": [
+          "generalAgent"
+        ],
+        "reasoning": "[rule:news_intent] [mock]"
+      },
+      "tags": [
+        "smoke",
+        "style:polite",
+        "length:medium",
+        "domain:cross_domain"
+      ]
+    },
+    {
+      "id": "crs_0044",
+      "query": "请帮我在飞书群里同步今天的新闻和明天日程",
+      "expected": {
+        "domain": "cross_domain",
+        "complexity": "complex",
+        "requiredAgents": [
+          "fileAgent",
+          "navigationAgent"
+        ]
+      },
+      "got": {
+        "domain": "general",
+        "complexity": "simple",
+        "requiredAgents": [
+          "generalAgent"
+        ],
+        "reasoning": "[rule:news_intent] [mock]"
+      },
+      "tags": [
+        "smoke",
+        "style:polite",
+        "length:short",
+        "domain:cross_domain"
+      ]
+    },
+    {
+      "id": "crs_0045",
+      "query": "我准备在飞书群里同步今天的新闻和明天日程。我现在在上海市区，时间比较紧，希望尽快搞定。",
+      "expected": {
+        "domain": "cross_domain",
+        "complexity": "complex",
+        "requiredAgents": [
+          "officeAgent",
+          "fileAgent"
+        ]
+      },
+      "got": {
+        "domain": "general",
+        "complexity": "simple",
+        "requiredAgents": [
+          "generalAgent"
+        ],
+        "reasoning": "[rule:news_intent] [mock]"
+      },
+      "tags": [
+        "smoke",
+        "style:implicit",
+        "length:long",
+        "domain:cross_domain"
+      ]
+    },
+    {
+      "id": "crs_0046",
+      "query": "我想在飞书群里同步今天的新闻和明天日程，谢谢",
+      "expected": {
+        "domain": "cross_domain",
+        "complexity": "complex",
+        "requiredAgents": [
+          "navigationAgent",
+          "multimediaAgent"
+        ]
+      },
+      "got": {
+        "domain": "general",
+        "complexity": "simple",
+        "requiredAgents": [
+          "generalAgent"
+        ],
+        "reasoning": "[rule:news_intent] [mock]"
+      },
+      "tags": [
+        "smoke",
+        "style:implicit",
+        "length:medium",
+        "domain:cross_domain"
+      ]
+    },
+    {
+      "id": "gen_0525",
+      "query": "请帮我今天天气不错",
+      "expected": {
+        "domain": "general",
+        "complexity": "simple",
+        "requiredAgents": [
+          "generalAgent"
+        ]
+      },
+      "got": {
+        "domain": "navigation",
+        "complexity": "simple",
+        "requiredAgents": [
+          "navigationAgent"
+        ],
+        "reasoning": "[rule:weather_intent] [mock]"
+      },
+      "tags": [
+        "smoke",
+        "style:polite",
+        "length:short",
+        "domain:general"
+      ]
+    },
+    {
+      "id": "gen_0526",
+      "query": "麻烦你今天天气不错",
+      "expected": {
+        "domain": "general",
+        "complexity": "simple",
+        "requiredAgents": [
+          "generalAgent"
+        ]
+      },
+      "got": {
+        "domain": "navigation",
+        "complexity": "simple",
+        "requiredAgents": [
+          "navigationAgent"
+        ],
+        "reasoning": "[rule:weather_intent] [mock]"
+      },
+      "tags": [
+        "smoke",
+        "style:command",
+        "length:short",
+        "domain:general"
+      ]
+    }
+  ]
+}
